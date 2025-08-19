@@ -2,11 +2,8 @@
 
 [![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-blue.svg)](https://docs.microsoft.com/en-us/powershell/)
 [![Windows](https://img.shields.io/badge/Windows-10%2F11-brightgreen.svg)](https://www.microsoft.com/windows)
-[![License](https://img.shields.io/badge/License-Unlicense-yellow.svg)](LICENSE)
 
 **Safely remove problematic Windows Updates with automatic restore point protection**
-
-A PowerShell tool to remove Windows updates causing system issues, with built-in safety features and comprehensive error handling.
 
 ## Quick Start
 
@@ -15,214 +12,91 @@ A PowerShell tool to remove Windows updates causing system issues, with built-in
 iex ((New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/danalec/WinUpdateRemover/main/WinUpdateRemover.ps1'))
 ```
 
-Or download and run:
-```powershell
-# Download first, then run as Admin
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/danalec/WinUpdateRemover/main/WinUpdateRemover.ps1" -OutFile "WinUpdateRemover.ps1"
-.\WinUpdateRemover.ps1
-```
-
-### System Restore Service Fix
-If restore point creation fails:
-- Run `WinUpdateRemover.ps1 -EnableSystemRestore` as Administrator
-- Or manually enable via Services (services.msc) → System Restore Service
-
-### Built-in Diagnostic Tools
-- **Verification Mode**: Check if updates are actually installed before removal
-- **Quick Fix Mode**: Automated Windows Update repair and cache reset
-- **Diagnostic Mode**: Comprehensive Windows Update system analysis
-
-## Requirements
-
-- Windows 10/11 (Administrator rights required)
-- PowerShell 5.1+
-- System Restore enabled (recommended)
-
 ## Usage
 
-### Interactive Mode (Recommended)
+### Interactive Mode
 ```powershell
 .\WinUpdateRemover.ps1
 ```
 
-### Diagnostic & Verification Tools
+### Target Specific Updates
 ```powershell
-# Verify if a specific update is installed
-.\WinUpdateRemover.ps1 -Verify -KBNumbers "KB5063878"
-
-# Run Windows Update repair
-.\WinUpdateRemover.ps1 -QuickFix
-
-# Comprehensive system diagnostics
-.\WinUpdateRemover.ps1 -Diagnostic
-
-# Enable System Restore service
-.\WinUpdateRemover.ps1 -EnableSystemRestore
-```
-
-### Batch Processing
-```powershell
-# Remove specific updates
+# Remove specific KBs
 .\WinUpdateRemover.ps1 -KBNumbers "KB5063878","KB5055523"
 
-# Silent removal
-.\WinUpdateRemover.ps1 -KBNumbers "KB5063878" -Force
+# Verify before removal
+.\WinUpdateRemover.ps1 -Verify -KBNumbers "KB5063878"
 
 # Preview only
 .\WinUpdateRemover.ps1 -ListOnly
 ```
 
-## Common Issues & Solutions
-
-### Error 0x800f0805: "Invalid Windows package"
-**Cause:** Update already removed or corrupted package
-**Fix:**
+### Diagnostic Tools
 ```powershell
-# Use built-in diagnostic tools
-.\WinUpdateRemover.ps1 -QuickFix          # Automated repair
-.\WinUpdateRemover.ps1 -Verify -KBNumbers "KB5063878"  # Check if update exists
-.\WinUpdateRemover.ps1 -Diagnostic       # Comprehensive analysis
+# Quick Windows Update repair
+.\WinUpdateRemover.ps1 -QuickFix
 
-# Manual verification:
-dism /online /get-packages | findstr "KB5063878"
+# Full system diagnostics
+.\WinUpdateRemover.ps1 -Diagnostic
+
+# Fix System Restore service
+.\WinUpdateRemover.ps1 -EnableSystemRestore
 ```
 
-### Error: "Service cannot be started"
-**Cause:** System Restore disabled
-**Fix:**
-```powershell
-# Enable System Restore service
-Set-Service -Name SRService -StartupType Automatic
-Start-Service -Name SRService
+## Common Issues
 
-# Enable System Restore on system drive
-Enable-ComputerRestore -Drive $env:SystemDrive
-Start-Service -Name VSS
-```
+| Error | Cause | Solution |
+|-------|-------|----------|
+| **0x800f0805** | Update already removed/corrupted | Run `.\WinUpdateRemover.ps1 -QuickFix` |
+| **Access denied** | Not admin | Run PowerShell as Administrator |
+| **Service cannot be started** | System Restore disabled | Run `.\WinUpdateRemover.ps1 -EnableSystemRestore` |
+| **Update not found** | Wrong format or not installed | Use exact KB format: `KB1234567` |
 
-### Error: "Access denied"
-**Cause:** Not running as Administrator
-**Fix:** Right-click PowerShell → "Run as Administrator"
+## Parameters
 
-### Error: "Update not found"
-**Cause:** Wrong KB format or update never installed
-**Fix:** Use exact KB number format: `KB1234567` (not `1234567`)
-
-### Error: "DISM failed"
-**Cause:** Windows Update service issues
-**Fix:**
-```powershell
-# Reset Windows Update components
-Stop-Service wuauserv,bits,cryptsvc
-Remove-Item "$env:SystemRoot\SoftwareDistribution\*" -Recurse -Force
-Start-Service wuauserv,bits,cryptsvc
-```
-
-### Error: "Restart required"
-**Cause:** Update partially removed
-**Fix:** Restart computer, then re-run script
-
-### Error: "Log file access denied"
-**Cause:** Previous instance still running
-**Fix:** Close all PowerShell windows, then retry
-
-### Error: "PowerShell execution policy"
-**Cause:** Script execution blocked
-**Fix:**
-```powershell
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-```
-
-## Advanced Parameters
-
-| Parameter | Example | Purpose |
+| Parameter | Purpose | Example |
 |-----------|---------|---------|
-| `-ListOnly` | `-ListOnly` | Preview updates without removal |
-| `-Force` | `-Force` | Skip confirmations |
-| `-KBNumbers` | `-KBNumbers "KB5063878"` | Target specific updates |
-| `-NoRestorePoint` | `-NoRestorePoint` | Skip restore point (not recommended) |
-| `-Verify` | `-Verify -KBNumbers "KB5063878"` | Check if updates are installed |
-| `-QuickFix` | `-QuickFix` | Automated Windows Update repair |
-| `-Diagnostic` | `-Diagnostic` | Comprehensive system analysis |
+| `-KBNumbers` | Target specific updates | `-KBNumbers "KB5063878"` |
+| `-Verify` | Check if updates installed | `-Verify -KBNumbers "KB5063878"` |
+| `-QuickFix` | Repair Windows Update | `-QuickFix` |
+| `-Diagnostic` | System analysis | `-Diagnostic` |
+| `-Force` | Skip confirmations | `-KBNumbers "KB5063878" -Force` |
+| `-ListOnly` | Preview without removal | `-ListOnly` |
 
-## Troubleshooting Checklist
-
-1. **Before running:**
-   - [ ] Run PowerShell as Administrator
-   - [ ] Check Windows Update service is running
-   - [ ] Verify System Restore is enabled
-
-2. **If removal fails:**
-   - [ ] Check update actually exists: `Get-HotFix -Id KB5063878`
-   - [ ] Run Windows Update troubleshooter
-   - [ ] Clear Windows Update cache
-   - [ ] Try Safe Mode if persistent
-
-3. **Get help:**
-   - Check logs: `%TEMP%\WinUpdateRemover_*.log`
-   - Report issues: [GitHub Issues](https://github.com/danalec/WinUpdateRemover/issues)
+## Requirements
+- Windows 10/11 (Administrator required)
+- PowerShell 5.1+
+- System Restore enabled (recommended)
 
 ## Safety Features
-
-- **Automatic restore point** before any changes
-- **Update verification** before removal attempts
-- **Multiple removal methods** (DISM, WUSA, Windows Update API)
-- **Detailed logging** for troubleshooting
-- **Confirmation prompts** in interactive mode
+- Automatic restore point creation
+- Update verification before removal
+- Multiple removal methods (DISM, WUSA, Windows Update API)
+- Detailed logging to `%TEMP%\WinUpdateRemover_*.log`
 
 ## Examples
 
-### Basic Usage
+**Basic removal:**
 ```powershell
-# Remove problematic SSD update
 .\WinUpdateRemover.ps1 -KBNumbers "KB5063878"
-
-# Remove multiple updates silently
-.\WinUpdateRemover.ps1 -KBNumbers "KB5063878","KB5055523","KB5062660" -Force
-
-# Check what would be removed
-.\WinUpdateRemover.ps1 -ListOnly | Out-GridView
-
-# Emergency removal (skip safety checks - use with caution)
-.\WinUpdateRemover.ps1 -KBNumbers "KB5063878" -Force -NoRestorePoint
 ```
 
-### Diagnostic & Verification Examples
+**Silent batch removal:**
 ```powershell
-# Verify if KB5063878 is actually installed before removal
-.\WinUpdateRemover.ps1 -Verify -KBNumbers "KB5063878"
-
-# Run comprehensive Windows Update diagnostics
-.\WinUpdateRemover.ps1 -Diagnostic
-
-# Quick fix for Windows Update issues
-.\WinUpdateRemover.ps1 -QuickFix
-
-# Complete workflow for 0x800f0805 error
-.\WinUpdateRemover.ps1 -Verify -KBNumbers "KB5063878"  # Check if update exists
-.\WinUpdateRemover.ps1 -QuickFix                       # Repair Windows Update
-.\WinUpdateRemover.ps1 -Diagnostic                     # Full system check
-.\WinUpdateRemover.ps1 -KBNumbers "KB5063878" -Force   # Remove if still needed
+.\WinUpdateRemover.ps1 -KBNumbers "KB5063878","KB5055523" -Force
 ```
 
-## Version History
+**Emergency workflow:**
+```powershell
+# Verify → Repair → Remove
+.\WinUpdateRemover.ps1 -Verify -KBNumbers "KB5063878"
+.\WinUpdateRemover.ps1 -QuickFix
+.\WinUpdateRemover.ps1 -KBNumbers "KB5063878"
+```
 
-### v1.0.4 (Current)
-- **Integrated EnableSystemRestore** functionality as new parameter
-- **Improved System Restore handling** - Better detection and repair of disabled SRService
-- **Enhanced troubleshooting** - Specific guidance for restore point failures
-- **Better error messages** - Clearer guidance when System Restore is unavailable
-- Enhanced error handling for 0x800f0805
-- Added comprehensive diagnostic mode
-- Improved KB verification
-- Added quick fix mode
-- Enhanced logging and troubleshooting
+## Troubleshooting
+1. **Before running:** Run PowerShell as Administrator
+2. **If fails:** Check logs in `%TEMP%\WinUpdateRemover_*.log`
 
-### v1.0.2
-- Added comprehensive diagnostics
-- Enhanced verification mode
-
-### v1.0.1
-- Initial release with basic update removal
-- Restore point protection
-- Interactive mode
+## License
+Unlicense - See [LICENSE](LICENSE) for details
