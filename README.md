@@ -51,6 +51,10 @@ iex ((New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.co
 | `-Diagnostic` | Run system analysis | `-Diagnostic` |
 | `-Force` | Skip confirmations | `-Force` |
 | `-ListOnly` | Preview without changes | `-ListOnly` |
+| `-UsePSWindowsUpdate` | Use PSWindowsUpdate module | `-UsePSWindowsUpdate -KBNumbers "KB5063878"` |
+| `-HideUpdate` | Hide update after removal | `-KBNumbers "KB5063878" -HideUpdate` |
+| `-DateRange` | Remove by date range | `-DateRange "2024-01-01"` |
+| `-RemoteComputer` | Target remote computer | `-RemoteComputer "SERVER01" -KBNumbers "KB5055523"` |
 
 ## Requirements
 - Windows 10/11
@@ -82,6 +86,9 @@ iex ((New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.co
 - Pre-removal verification
 - Multiple removal methods
 - Detailed logging
+- SSU detection and warnings
+- Remote computer validation
+- Update hiding capabilities
 
 ## Common Issues
 
@@ -94,6 +101,7 @@ iex ((New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.co
 
 ## Examples
 
+### Basic Usage
 ```powershell
 # Basic removal
 .\WinUpdateRemover.ps1 -KBNumbers "KB5053656"
@@ -110,10 +118,74 @@ iex ((New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.co
 .\WinUpdateRemover.ps1 -KBNumbers "KB5063878"
 ```
 
+### PSWindowsUpdate Integration
+```powershell
+# Use PSWindowsUpdate module for removal
+.\WinUpdateRemover.ps1 -UsePSWindowsUpdate -KBNumbers "KB5063878"
+
+# Hide updates after removal (requires PSWindowsUpdate)
+.\WinUpdateRemover.ps1 -KBNumbers "KB5063878" -HideUpdate
+```
+
+### Date-Based Removal
+```powershell
+# Remove all updates installed after specific date
+.\WinUpdateRemover.ps1 -DateRange "2024-01-01"
+
+# Remove updates from last 30 days
+$30DaysAgo = (Get-Date).AddDays(-30).ToString("yyyy-MM-dd")
+.\WinUpdateRemover.ps1 -DateRange $30DaysAgo
+```
+
+### Remote Computer Support
+```powershell
+# Remove updates from remote computer
+.\WinUpdateRemover.ps1 -RemoteComputer "SERVER01" -KBNumbers "KB5055523"
+
+# Remote removal with PSWindowsUpdate
+.\WinUpdateRemover.ps1 -RemoteComputer "SERVER01" -KBNumbers "KB5063878" -UsePSWindowsUpdate
+
+# Batch remote removal
+$computers = @("SERVER01", "SERVER02", "WORKSTATION01")
+foreach ($computer in $computers) {
+    .\WinUpdateRemover.ps1 -RemoteComputer $computer -KBNumbers "KB5063878" -Force
+}
+```
+
+## Servicing Stack Updates (SSU) Warnings
+
+The script automatically detects **Servicing Stack Updates (SSUs)** and **Combined SSU/LCU packages** that cannot be removed:
+
+- **SSUs are permanent system components** required for Windows Update functionality
+- **Combined SSU/LCU packages** contain both servicing stack and cumulative updates
+- These updates will be **skipped automatically** with appropriate warnings
+- **Manual removal** may be possible via Windows Settings → Update & Security → Update History → Uninstall Updates
+
 ## Troubleshooting
+
+### General Issues
 1. **Run as Administrator**
 2. **Check logs:** `%TEMP%\WinUpdateRemover_*.log`
 3. **Use -Diagnostic for system analysis**
+
+### Remote Computer Issues
+| Issue | Solution |
+|-------|----------|
+| **Access denied** | Ensure PowerShell remoting is enabled: `Enable-PSRemoting -Force` |
+| **Network connectivity** | Verify computer name and network access |
+| **Authentication** | Use appropriate credentials for remote access |
+
+### PSWindowsUpdate Module
+| Issue | Solution |
+|-------|----------|
+| **Module not found** | Run with admin rights to auto-install: `-UsePSWindowsUpdate` |
+| **Import failure** | Install manually: `Install-Module PSWindowsUpdate -Force` |
+
+### Date Range Issues
+| Issue | Solution |
+|-------|----------|
+| **Invalid date format** | Use ISO format: `yyyy-MM-dd` |
+| **No updates found** | Verify date range includes actual update installations |
 
 ## License
 [Unlicense](LICENSE)

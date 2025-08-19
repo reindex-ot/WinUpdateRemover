@@ -40,6 +40,26 @@
     - Date Range: .\WinUpdateRemover.ps1 -DateRange "2024-01-01:2024-12-31"
     - Remote Computer: .\WinUpdateRemover.ps1 -KBNumbers "KB5055523" -RemoteComputer "SERVER01"
 
+.PARAMETER UsePSWindowsUpdate
+    Use the PSWindowsUpdate PowerShell module for enhanced update removal reliability.
+    This module provides better error handling and update hiding capabilities.
+    Usage: -UsePSWindowsUpdate
+
+.PARAMETER HideUpdate
+    Hide the specified update from Windows Update to prevent reinstallation.
+    This requires the PSWindowsUpdate module to be available.
+    Usage: -HideUpdate
+
+.PARAMETER DateRange
+    Remove updates installed within a specific date range.
+    Format: "YYYY-MM-DD:YYYY-MM-DD" (start:end)
+    Usage: -DateRange "2024-01-01:2024-12-31"
+
+.PARAMETER RemoteComputer
+    Process updates on a remote computer via PowerShell remoting.
+    Requires WinRM to be enabled on the remote computer.
+    Usage: -RemoteComputer "SERVER01"
+
 .NOTES
     Author: @danalec
     Version: 1.0.18
@@ -237,6 +257,32 @@ function Remove-DISMPackage {
         Message = $errorMessage
         PackageName = $PackageName
     }
+}
+
+# Enhanced SSU detection and warning function
+function Test-SSUDetection {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$KBNumber
+    )
+    
+    $ssuUpdates = @(
+        "KB5063878", "KB5062839", "KB5062978", "KB5034441", "KB5034127", 
+        "KB5031356", "KB5029331", "KB5028166", "KB5027231", "KB5025221"
+    )
+    
+    $normalizedKB = $KBNumber -replace "KB", ""
+    $fullKB = "KB$normalizedKB"
+    
+    if ($ssuUpdates -contains $fullKB) {
+        Write-Host "`n[SSU WARNING] $fullKB contains Servicing Stack Updates (SSU)" -ForegroundColor Black -BackgroundColor Yellow
+        Write-Host "SSU components are permanent system updates and cannot be removed via standard methods." -ForegroundColor Yellow
+        Write-Host "This update may require manual removal via Windows Settings > Update & Security > Update History > Uninstall updates" -ForegroundColor Cyan
+        Write-Host "For more information, see: https://learn.microsoft.com/en-us/windows/deployment/update/servicing-stack-updates" -ForegroundColor Blue
+        return $true
+    }
+    
+    return $false
 }
 
 # Enhanced WUSA error handling for Windows 10 1507+
@@ -3074,6 +3120,13 @@ foreach ($update in $updatesToProcess) {
         Write-Host "`nProcessing KB$kb..." -ForegroundColor Yellow
     }
     Write-Host "Description: $desc" -ForegroundColor Gray
+    
+    # Check for SSU updates before processing
+    $isSSU = Test-SSUDetection -KBNumber $kb
+    if ($isSSU) {
+        Write-Host "Skipping SSU update due to permanent nature..." -ForegroundColor Yellow
+        continue
+    }
     
     if (-not $Force) {
         $remove = Read-Host "Remove this update? (y/n/skip all) [Default: y]"
