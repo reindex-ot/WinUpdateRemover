@@ -34,7 +34,7 @@
 
 .NOTES
     Author: @danalec
-   # Version: 1.0.12
+   # Version: 1.0.13
     Requires: Administrator privileges
     
     Troubleshooting System Restore Issues:
@@ -89,7 +89,7 @@ param(
 )
 
 $Script:ScriptName = "WinUpdateRemover"
-$Script:Version = "v1.0.12"
+$Script:Version = "v1.0.13"
 $ErrorActionPreference = "Stop"
 
 # Enhanced DISM Functions for Advanced Package Management
@@ -1964,7 +1964,29 @@ if ($KBNumbers) {
                 for ($i = 0; $i -lt $installedUpdates.Count; $i++) {
                     $update = $installedUpdates[$i]
                     $installedDate = if ($update.InstalledOn) { $update.InstalledOn.ToString("yyyy-MM-dd") } else { "Unknown" }
-                    Write-Host "$($i+1). $($update.HotFixID) - $($update.Description) (Installed: $installedDate)" -ForegroundColor White
+                    $kbNumber = Get-NormalizedKBNumber $update.HotFixID
+                    
+                    # Check if this is a problematic/critical KB
+                    $isCritical = $false
+                    $isCombinedSSU = $false
+                    
+                    foreach ($problematicKB in $problematicKBs) {
+                        if ($problematicKB -like "*$kbNumber*") {
+                            $isCritical = $true
+                            if ($problematicKB -like "*Combined SSU/LCU*") {
+                                $isCombinedSSU = $true
+                            }
+                            break
+                        }
+                    }
+                    
+                    if ($isCritical) {
+                        $color = if ($isCombinedSSU) { "Red" } else { "Yellow" }
+                        $prefix = if ($isCombinedSSU) { "[CRITICAL] " } else { "[WARNING] " }
+                        Write-Host "$($i+1). $prefix$($update.HotFixID) - $($update.Description) (Installed: $installedDate)" -ForegroundColor $color
+                    } else {
+                        Write-Host "$($i+1). $($update.HotFixID) - $($update.Description) (Installed: $installedDate)" -ForegroundColor White
+                    }
                 }
                 Write-Host ""
                 
