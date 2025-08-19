@@ -1,20 +1,22 @@
 <#
 .SYNOPSIS
-    Windows Update Remover - Safely remove problematic Windows Updates with automatic restore point protection
+    Windows Update Remover - Safely remove and block problematic Windows Updates with automatic restore point protection
 
 .DESCRIPTION
-    WinUpdateRemover is an interactive PowerShell tool designed to help Windows administrators and power users safely remove problematic Windows Updates that may cause system instability, performance issues, or hardware problems.
+    WinUpdateRemover is an interactive PowerShell tool designed to help Windows administrators and power users safely remove and block problematic Windows Updates that may cause system instability, performance issues, or hardware problems.
     
     Features:
     - Safe Removal Process: Automatic System Restore point creation before any changes
     - Targeted Removal: Remove specific problematic updates (like KB5063878 causing SSD issues)
+    - Update Blocking: Prevent specific updates from being installed via registry-based blocking
     - Enhanced Error Handling: Improved handling for 0x800f0805 and other common errors
     - Multi-Method Removal: Four different removal approaches (DISM auto-detect, DISM standard, WUSA, Windows Update API)
     - Smart Detection: Automatically checks if updates are installed before attempting removal
     - Interactive Mode: Step-by-step guidance with confirmation prompts
     - Verification Mode: Check if specific KB updates are actually installed
-    - Quick Fix Mode: Automated Windows Update repair and cache reset
+    - Repair Windows Update Mode: Automated Windows Update repair and cache reset
     - Diagnostic Mode: Comprehensive Windows Update system analysis
+    - Block Status Checking: Verify if updates are currently blocked
     
     Usage Examples:
     - Interactive: .\WinUpdateRemover.ps1
@@ -22,13 +24,17 @@
     - Force Mode: .\WinUpdateRemover.ps1 -Force
     - List Only: .\WinUpdateRemover.ps1 -ListOnly
     - Verify KB: .\WinUpdateRemover.ps1 -Verify -KBNumbers "KB5063878"
-    - Quick Fix: .\WinUpdateRemover.ps1 -QuickFix
+    - Repair Windows Update: .\WinUpdateRemover.ps1 -QuickFix
     - Diagnostic: .\WinUpdateRemover.ps1 -Diagnostic
     - Enable System Restore: .\WinUpdateRemover.ps1 -EnableSystemRestore
+    - Show Block Methods: .\WinUpdateRemover.ps1 -ShowBlockMethods
+    - Block Update: .\WinUpdateRemover.ps1 -BlockUpdate -KBNumbers "KB5063878"
+    - Unblock Update: .\WinUpdateRemover.ps1 -UnblockUpdate -KBNumbers "KB5063878"
+    - Check Block Status: .\WinUpdateRemover.ps1 -CheckBlockStatus -KBNumbers "KB5063878"
 
 .NOTES
     Author: @danalec
-    Version: 1.0.4
+    Version: 1.0.6
     Requires: Administrator privileges
     
     Troubleshooting System Restore Issues:
@@ -67,11 +73,23 @@ param(
     [switch]$Diagnostic,
     
     [Parameter(Mandatory=$false)]
-    [switch]$EnableSystemRestore
+    [switch]$EnableSystemRestore,
+    
+    [Parameter(Mandatory=$false)]
+    [switch]$ShowBlockMethods,
+    
+    [Parameter(Mandatory=$false)]
+    [switch]$BlockUpdate,
+    
+    [Parameter(Mandatory=$false)]
+    [switch]$UnblockUpdate,
+    
+    [Parameter(Mandatory=$false)]
+    [switch]$CheckBlockStatus
 )
 
 $Script:ScriptName = "WinUpdateRemover"
-$Script:Version = "v1.0.4"
+$Script:Version = "v1.0.6"
 $ErrorActionPreference = "Stop"
 
 # Check for administrator privileges
@@ -131,6 +149,83 @@ if ($QuickFix) {
 
 if ($Diagnostic) {
     Invoke-Diagnostic
+    exit 0
+}
+
+if ($ShowBlockMethods) {
+    Show-BlockingMethods
+    exit 0
+}
+
+if ($BlockUpdate) {
+    if ($KBNumbers) {
+        foreach ($kb in $KBNumbers) {
+            $normalizedKB = Get-NormalizedKBNumber $kb
+            if ($normalizedKB) {
+                Block-UpdateKB -KBNumber $normalizedKB
+            } else {
+                Write-Warning "Invalid KB format: $kb"
+            }
+        }
+    } else {
+        Write-Host "=== Block Update Mode ===" -ForegroundColor Cyan
+        Write-Host "Enter KB number to block (e.g., KB5063878):" -ForegroundColor Yellow
+        $kbInput = Read-Host "KB Number"
+        $normalizedKB = Get-NormalizedKBNumber $kbInput
+        if ($normalizedKB) {
+            Block-UpdateKB -KBNumber $normalizedKB
+        } else {
+            Write-Warning "Invalid KB format: $kbInput"
+        }
+    }
+    exit 0
+}
+
+if ($UnblockUpdate) {
+    if ($KBNumbers) {
+        foreach ($kb in $KBNumbers) {
+            $normalizedKB = Get-NormalizedKBNumber $kb
+            if ($normalizedKB) {
+                Unblock-UpdateKB -KBNumber $normalizedKB
+            } else {
+                Write-Warning "Invalid KB format: $kb"
+            }
+        }
+    } else {
+        Write-Host "=== Unblock Update Mode ===" -ForegroundColor Cyan
+        Write-Host "Enter KB number to unblock (e.g., KB5063878):" -ForegroundColor Yellow
+        $kbInput = Read-Host "KB Number"
+        $normalizedKB = Get-NormalizedKBNumber $kbInput
+        if ($normalizedKB) {
+            Unblock-UpdateKB -KBNumber $normalizedKB
+        } else {
+            Write-Warning "Invalid KB format: $kbInput"
+        }
+    }
+    exit 0
+}
+
+if ($CheckBlockStatus) {
+    if ($KBNumbers) {
+        foreach ($kb in $KBNumbers) {
+            $normalizedKB = Get-NormalizedKBNumber $kb
+            if ($normalizedKB) {
+                Check-UpdateBlockStatus -KBNumber $normalizedKB
+            } else {
+                Write-Warning "Invalid KB format: $kb"
+            }
+        }
+    } else {
+        Write-Host "=== Check Block Status Mode ===" -ForegroundColor Cyan
+        Write-Host "Enter KB number to check (e.g., KB5063878):" -ForegroundColor Yellow
+        $kbInput = Read-Host "KB Number"
+        $normalizedKB = Get-NormalizedKBNumber $kbInput
+        if ($normalizedKB) {
+            Check-UpdateBlockStatus -KBNumber $normalizedKB
+        } else {
+            Write-Warning "Invalid KB format: $kbInput"
+        }
+    }
     exit 0
 }
 
@@ -308,9 +403,9 @@ function Verify-KB {
     return $found
 }
 
-# Function to perform quick fixes (from QuickFix.bat)
+# Function to perform repair Windows Update (from QuickFix.bat)
 function Invoke-QuickFix {
-    Write-Host "=== Windows Update Quick Fix ===" -ForegroundColor Cyan
+    Write-Host "=== Repair Windows Update ===" -ForegroundColor Cyan
     Write-Host "Running comprehensive Windows Update repair..." -ForegroundColor Yellow
     Write-Host ""
     
@@ -385,7 +480,7 @@ function Invoke-QuickFix {
     }
     
     Write-Host ""
-    Write-Host "[OK] Quick fix completed!" -ForegroundColor Green
+    Write-Host "[OK] Repair Windows Update completed!" -ForegroundColor Green
     Write-Host "[INFO] Next steps:" -ForegroundColor Cyan
     Write-Host "   1. Restart your computer" -ForegroundColor White
     Write-Host "   2. Run Windows Update to check for new updates" -ForegroundColor White
@@ -506,8 +601,9 @@ function Invoke-Diagnostic {
         $pending = $searcher.Search("IsInstalled=0")
         Write-Host "   [INFO] Pending updates: $($pending.Updates.Count)" -ForegroundColor Cyan
         if ($pending.Updates.Count -gt 0) {
-            foreach ($update in $pending.Updates[0..4]) {  # Show first 5
-                Write-Host "   - $($update.Title)" -ForegroundColor Gray
+            $maxDisplay = [Math]::Min(5, $pending.Updates.Count)
+            for ($i = 0; $i -lt $maxDisplay; $i++) {
+                Write-Host "   - $($pending.Updates.Item($i).Title)" -ForegroundColor Gray
             }
             if ($pending.Updates.Count -gt 5) {
                 Write-Host "   ... and $($pending.Updates.Count - 5) more" -ForegroundColor Gray
@@ -576,6 +672,160 @@ function Invoke-Diagnostic {
     }
 }
 
+# ===== BLOCKING FUNCTIONS =====
+
+function Show-BlockingMethods {
+    Write-Host "=== Windows Update Blocking Methods ===" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Available methods to block Windows Updates:" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "1. Registry-based blocking (Recommended)" -ForegroundColor Green
+    Write-Host "   - Adds KB to Windows Update hidden list"
+    Write-Host "   - Prevents automatic installation"
+    Write-Host "   - Reversible and safe"
+    Write-Host ""
+    Write-Host "2. Group Policy (Enterprise environments)" -ForegroundColor Cyan
+    Write-Host "   - Configure through gpedit.msc"
+    Write-Host "   - Computer Configuration > Administrative Templates > Windows Components > Windows Update"
+    Write-Host "   - Set 'Configure Automatic Updates' to disabled"
+    Write-Host ""
+    Write-Host "3. Windows Update Settings" -ForegroundColor Yellow
+    Write-Host "   - Settings > Update & Security > Windows Update"
+    Write-Host "   - Advanced options > Choose how updates are delivered"
+    Write-Host "   - Pause updates for up to 35 days"
+    Write-Host ""
+    Write-Host "4. WSUS Offline (Advanced users)" -ForegroundColor Magenta
+    Write-Host "   - Download and install specific updates manually"
+    Write-Host "   - Bypass Windows Update entirely"
+    Write-Host ""
+    Write-Host "This script uses Method 1 (Registry-based blocking) for safety and reliability." -ForegroundColor Green
+}
+
+function Block-UpdateKB {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$KBNumber
+    )
+    
+    try {
+        Write-Host "Blocking KB$KBNumber from Windows Update..." -ForegroundColor Yellow
+        
+        # Create registry path if it doesn't exist
+        $regPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate"
+        if (!(Test-Path $regPath)) {
+            New-Item -Path $regPath -Force | Out-Null
+            Write-Host "Created Windows Update policy registry path" -ForegroundColor Green
+        }
+        
+        # Add KB to hidden updates list
+        $hiddenPath = "$regPath\HiddenUpdates"
+        if (!(Test-Path $hiddenPath)) {
+            New-Item -Path $hiddenPath -Force | Out-Null
+        }
+        
+        Set-ItemProperty -Path $hiddenPath -Name "KB$KBNumber" -Value 1 -Type DWord
+        Write-Host "Added KB$KBNumber to hidden updates list" -ForegroundColor Green
+        
+        # Configure Windows Update to exclude recommended updates
+        Set-ItemProperty -Path $regPath -Name "IncludeRecommendedUpdates" -Value 0 -Type DWord -ErrorAction SilentlyContinue
+        
+        Write-Host "KB$KBNumber has been successfully blocked!" -ForegroundColor Green
+        Write-Host "Note: You may need to restart Windows Update service for changes to take effect." -ForegroundColor Cyan
+        
+    } catch {
+        Write-Host "Error blocking KB$KBNumber`: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+
+function Unblock-UpdateKB {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$KBNumber
+    )
+    
+    try {
+        Write-Host "Unblocking KB$KBNumber from Windows Update..." -ForegroundColor Yellow
+        
+        $hiddenPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\HiddenUpdates"
+        
+        if (Test-Path $hiddenPath) {
+            $property = Get-ItemProperty -Path $hiddenPath -Name "KB$KBNumber" -ErrorAction SilentlyContinue
+            if ($property) {
+                Remove-ItemProperty -Path $hiddenPath -Name "KB$KBNumber"
+                Write-Host "Removed KB$KBNumber from hidden updates list" -ForegroundColor Green
+                Write-Host "KB$KBNumber has been successfully unblocked!" -ForegroundColor Green
+            } else {
+                Write-Host "KB$KBNumber was not found in the blocked list" -ForegroundColor Yellow
+            }
+        } else {
+            Write-Host "No hidden updates registry path found" -ForegroundColor Yellow
+        }
+        
+    } catch {
+        Write-Host "Error unblocking KB$KBNumber`: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+
+function Check-UpdateBlockStatus {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$KBNumber
+    )
+    
+    try {
+        Write-Host "Checking block status for KB$KBNumber..." -ForegroundColor Yellow
+        Write-Host ""
+        
+        # Check registry blocking status
+        $hiddenPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\HiddenUpdates"
+        $isBlocked = $false
+        
+        if (Test-Path $hiddenPath) {
+            $property = Get-ItemProperty -Path $hiddenPath -Name "KB$KBNumber" -ErrorAction SilentlyContinue
+            if ($property) {
+                $isBlocked = $true
+                Write-Host "[BLOCKED] KB$KBNumber is in the hidden updates list" -ForegroundColor Red
+            }
+        }
+        
+        if (-not $isBlocked) {
+            Write-Host "[NOT BLOCKED] KB$KBNumber is not in the hidden updates list" -ForegroundColor Green
+        }
+        
+        # Check if update is available
+        Write-Host "Checking Windows Update availability..." -ForegroundColor Cyan
+        try {
+            $session = New-Object -ComObject "Microsoft.Update.Session"
+            $searcher = $session.CreateUpdateSearcher()
+            $searchResult = $searcher.Search("IsInstalled=0")
+            
+            $foundUpdate = $false
+            foreach ($update in $searchResult.Updates) {
+                if ($update.Title -match "KB$KBNumber" -or $update.KBArticleIDs -contains $KBNumber) {
+                    $foundUpdate = $true
+                    Write-Host "[AVAILABLE] KB$KBNumber is available for download" -ForegroundColor Yellow
+                    Write-Host "Title: $($update.Title)" -ForegroundColor White
+                    break
+                }
+            }
+            
+            if (-not $foundUpdate) {
+                Write-Host "[NOT AVAILABLE] KB$KBNumber is not available in Windows Update" -ForegroundColor Cyan
+            }
+            
+        } catch {
+            Write-Host "[INFO] Could not check Windows Update availability: $($_.Exception.Message)" -ForegroundColor Gray
+        }
+        
+        Write-Host ""
+        Write-Host "Block Status Summary:" -ForegroundColor Cyan
+        Write-Host "Registry Blocked: $(if ($isBlocked) { 'YES' } else { 'NO' })" -ForegroundColor $(if ($isBlocked) { 'Red' } else { 'Green' })
+        
+    } catch {
+        Write-Host "Error checking block status for KB$KBNumber`: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+
 if ($installedUpdates.Count -eq 0) {
     Write-Host "No updates found to remove." -ForegroundColor Yellow
     Read-Host "Press Enter to exit"
@@ -622,32 +872,149 @@ if ($KBNumbers) {
     Write-Host "List-only mode: displaying updates without removal option" -ForegroundColor Cyan
     exit 0
 } else {
-    # Interactive selection
+    # Interactive menu
     Write-Host ""
-    Write-Host "Select updates to remove:" -ForegroundColor Yellow
-    Write-Host "- Enter numbers separated by commas (e.g., 1,3,5)" -ForegroundColor Gray
-    Write-Host "- Enter 'all' to select all updates" -ForegroundColor Gray
-    Write-Host "- Enter 'quit' to exit" -ForegroundColor Gray
+    Write-Host "=== Interactive Menu ===" -ForegroundColor Cyan
+    Write-Host "Choose an action:" -ForegroundColor Yellow
+    Write-Host "1. Remove installed updates" -ForegroundColor White
+    Write-Host "2. Block specific updates from installing" -ForegroundColor White
+    Write-Host "3. Unblock previously blocked updates" -ForegroundColor White
+    Write-Host "4. Check blocking status of updates" -ForegroundColor White
+    Write-Host "5. Show blocking methods information" -ForegroundColor White
+    Write-Host "6. Quick Fix (repair Windows Update)" -ForegroundColor White
+    Write-Host "7. Run diagnostics" -ForegroundColor White
+    Write-Host "8. Exit" -ForegroundColor Gray
+    Write-Host ""
+    
+    $menuChoice = Read-Host "Enter your choice (1-8)"
+    
+    switch ($menuChoice) {
+        "1" {
+            # Original update removal functionality
+            Write-Host ""
+            Write-Host "Select updates to remove:" -ForegroundColor Yellow
+            Write-Host "- Enter numbers separated by commas (e.g., 1,3,5)" -ForegroundColor Gray
+            Write-Host "- Enter 'all' to select all updates" -ForegroundColor Gray
+            Write-Host "- Enter 'back' to return to main menu" -ForegroundColor Gray
 
-    $selection = Read-Host "Your selection"
+            $selection = Read-Host "Your selection"
 
-    if ($selection -eq 'quit') {
-        Write-Host "Exiting..." -ForegroundColor Yellow
-        exit 0
-    }
-
-    # Parse selection
-    $updatesToProcess = @()
-    if ($selection -eq 'all') {
-        $updatesToProcess = $installedUpdates
-    } else {
-        $indices = $selection -split ',' | ForEach-Object { $_.Trim() }
-        foreach ($index in $indices) {
-            if ($index -match '^\d+$' -and [int]$index -ge 1 -and [int]$index -le $installedUpdates.Count) {
-                $updatesToProcess += $installedUpdates[[int]$index - 1]
-            } else {
-                Write-Warning "Invalid selection: $index"
+            if ($selection -eq 'back') {
+                # Restart the script to show menu again
+                & $MyInvocation.MyCommand.Path
+                exit 0
             }
+
+            # Parse selection
+            $updatesToProcess = @()
+            if ($selection -eq 'all') {
+                $updatesToProcess = $installedUpdates
+            } else {
+                $indices = $selection -split ',' | ForEach-Object { $_.Trim() }
+                foreach ($index in $indices) {
+                    if ($index -match '^\d+$' -and [int]$index -ge 1 -and [int]$index -le $installedUpdates.Count) {
+                        $updatesToProcess += $installedUpdates[[int]$index - 1]
+                    } else {
+                        Write-Warning "Invalid selection: $index"
+                    }
+                }
+            }
+        }
+        "2" {
+            # Block updates
+            Write-Host ""
+            Write-Host "=== Block Updates ===" -ForegroundColor Cyan
+            Write-Host "Enter KB number(s) to block (comma-separated, e.g., KB5063878,KB1234567):" -ForegroundColor Yellow
+            $kbInput = Read-Host "KB Number(s)"
+            if ($kbInput) {
+                $kbs = $kbInput -split ',' | ForEach-Object { $_.Trim() }
+                foreach ($kb in $kbs) {
+                    $normalizedKB = Get-NormalizedKBNumber $kb
+                    if ($normalizedKB) {
+                        Block-UpdateKB -KBNumber $normalizedKB
+                    } else {
+                        Write-Warning "Invalid KB format: $kb"
+                    }
+                }
+            }
+            Read-Host "Press Enter to continue"
+            & $MyInvocation.MyCommand.Path
+            exit 0
+        }
+        "3" {
+            # Unblock updates
+            Write-Host ""
+            Write-Host "=== Unblock Updates ===" -ForegroundColor Cyan
+            Write-Host "Enter KB number(s) to unblock (comma-separated, e.g., KB5063878,KB1234567):" -ForegroundColor Yellow
+            $kbInput = Read-Host "KB Number(s)"
+            if ($kbInput) {
+                $kbs = $kbInput -split ',' | ForEach-Object { $_.Trim() }
+                foreach ($kb in $kbs) {
+                    $normalizedKB = Get-NormalizedKBNumber $kb
+                    if ($normalizedKB) {
+                        Unblock-UpdateKB -KBNumber $normalizedKB
+                    } else {
+                        Write-Warning "Invalid KB format: $kb"
+                    }
+                }
+            }
+            Read-Host "Press Enter to continue"
+            & $MyInvocation.MyCommand.Path
+            exit 0
+        }
+        "4" {
+            # Check blocking status
+            Write-Host ""
+            Write-Host "=== Check Blocking Status ===" -ForegroundColor Cyan
+            Write-Host "Enter KB number(s) to check (comma-separated, e.g., KB5063878,KB1234567):" -ForegroundColor Yellow
+            $kbInput = Read-Host "KB Number(s)"
+            if ($kbInput) {
+                $kbs = $kbInput -split ',' | ForEach-Object { $_.Trim() }
+                foreach ($kb in $kbs) {
+                    $normalizedKB = Get-NormalizedKBNumber $kb
+                    if ($normalizedKB) {
+                        Check-UpdateBlockStatus -KBNumber $normalizedKB
+                        Write-Host ""
+                    } else {
+                        Write-Warning "Invalid KB format: $kb"
+                    }
+                }
+            }
+            Read-Host "Press Enter to continue"
+            & $MyInvocation.MyCommand.Path
+            exit 0
+        }
+        "5" {
+            # Show blocking methods
+            Show-BlockingMethods
+            Write-Host ""
+            Read-Host "Press Enter to continue"
+            & $MyInvocation.MyCommand.Path
+            exit 0
+        }
+        "6" {
+             # Repair Windows Update
+            Invoke-QuickFix
+            Read-Host "Press Enter to continue"
+            & $MyInvocation.MyCommand.Path
+            exit 0
+        }
+        "7" {
+            # Diagnostics
+            Invoke-Diagnostic
+            Read-Host "Press Enter to continue"
+            & $MyInvocation.MyCommand.Path
+            exit 0
+        }
+        "8" {
+            Write-Host "Exiting..." -ForegroundColor Yellow
+            exit 0
+        }
+        default {
+            Write-Warning "Invalid choice. Please select 1-8."
+            Read-Host "Press Enter to continue"
+            & $MyInvocation.MyCommand.Path
+            exit 0
         }
     }
 }
@@ -948,7 +1315,7 @@ foreach ($update in $updatesToProcess) {
             Write-Host "5. Try Safe Mode if issue persists" -ForegroundColor White
             
             # Add specific Windows Update troubleshooting commands
-            Write-Host "`nQuick fixes to try:" -ForegroundColor Cyan
+            Write-Host "`nRepair Windows Update options to try:" -ForegroundColor Cyan
             Write-Host "- Reset Windows Update components:" -ForegroundColor White
             Write-Host "  Stop-Service wuauserv,bits,cryptsvc" -ForegroundColor Gray
             Write-Host "  Remove-Item `"`$env:SystemRoot\SoftwareDistribution\*`" -Recurse -Force" -ForegroundColor Gray

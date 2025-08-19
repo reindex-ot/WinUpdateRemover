@@ -94,6 +94,18 @@ iex ((New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.co
 .\WinUpdateRemover.ps1 -KBNumbers "KB5063878"
 ```
 
+**Block problematic updates:**
+```powershell
+# Prevent KB5063878 from installing
+.\BlockKB5063878.ps1 -BlockUpdate
+
+# Check if update is blocked
+.\BlockKB5063878.ps1 -CheckStatus
+
+# Show all blocking methods
+.\BlockKB5063878.ps1 -ShowMethods
+```
+
 ## Troubleshooting
 1. **Before running:** Run PowerShell as Administrator
 2. **If fails:** Check logs in `%TEMP%\WinUpdateRemover_*.log`
