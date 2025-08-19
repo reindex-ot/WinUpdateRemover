@@ -22,6 +22,11 @@ Invoke-WebRequest -Uri "https://raw.githubusercontent.com/danalec/WinUpdateRemov
 .\WinUpdateRemover.ps1
 ```
 
+### Built-in Diagnostic Tools
+- **Verification Mode**: Check if updates are actually installed before removal
+- **Quick Fix Mode**: Automated Windows Update repair and cache reset
+- **Diagnostic Mode**: Comprehensive Windows Update system analysis
+
 ## Requirements
 
 - Windows 10/11 (Administrator rights required)
@@ -33,6 +38,18 @@ Invoke-WebRequest -Uri "https://raw.githubusercontent.com/danalec/WinUpdateRemov
 ### Interactive Mode (Recommended)
 ```powershell
 .\WinUpdateRemover.ps1
+```
+
+### Diagnostic & Verification Tools
+```powershell
+# Verify if a specific update is installed
+.\WinUpdateRemover.ps1 -Verify -KBNumbers "KB5063878"
+
+# Run Windows Update repair
+.\WinUpdateRemover.ps1 -QuickFix
+
+# Comprehensive system diagnostics
+.\WinUpdateRemover.ps1 -Diagnostic
 ```
 
 ### Batch Processing
@@ -53,9 +70,13 @@ Invoke-WebRequest -Uri "https://raw.githubusercontent.com/danalec/WinUpdateRemov
 **Cause:** Update already removed or corrupted package
 **Fix:**
 ```powershell
-# Check if update exists
+# Use built-in diagnostic tools
+.\WinUpdateRemover.ps1 -QuickFix          # Automated repair
+.\WinUpdateRemover.ps1 -Verify -KBNumbers "KB5063878"  # Check if update exists
+.\WinUpdateRemover.ps1 -Diagnostic       # Comprehensive analysis
+
+# Manual verification:
 dism /online /get-packages | findstr "KB5063878"
-# Then run Windows Update troubleshooter
 ```
 
 ### Error: "Service cannot be started"
@@ -107,6 +128,9 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 | `-Force` | `-Force` | Skip confirmations |
 | `-KBNumbers` | `-KBNumbers "KB5063878"` | Target specific updates |
 | `-NoRestorePoint` | `-NoRestorePoint` | Skip restore point (not recommended) |
+| `-Verify` | `-Verify -KBNumbers "KB5063878"` | Check if updates are installed |
+| `-QuickFix` | `-QuickFix` | Automated Windows Update repair |
+| `-Diagnostic` | `-Diagnostic` | Comprehensive system analysis |
 
 ## Troubleshooting Checklist
 
@@ -135,6 +159,7 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 ## Examples
 
+### Basic Usage
 ```powershell
 # Remove problematic SSD update
 .\WinUpdateRemover.ps1 -KBNumbers "KB5063878"
@@ -147,4 +172,22 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 # Emergency removal (skip safety checks - use with caution)
 .\WinUpdateRemover.ps1 -KBNumbers "KB5063878" -Force -NoRestorePoint
+```
+
+### Diagnostic & Verification Examples
+```powershell
+# Verify if KB5063878 is actually installed before removal
+.\WinUpdateRemover.ps1 -Verify -KBNumbers "KB5063878"
+
+# Run comprehensive Windows Update diagnostics
+.\WinUpdateRemover.ps1 -Diagnostic
+
+# Quick fix for Windows Update issues
+.\WinUpdateRemover.ps1 -QuickFix
+
+# Complete workflow for 0x800f0805 error
+.\WinUpdateRemover.ps1 -Verify -KBNumbers "KB5063878"  # Check if update exists
+.\WinUpdateRemover.ps1 -QuickFix                       # Repair Windows Update
+.\WinUpdateRemover.ps1 -Diagnostic                     # Full system check
+.\WinUpdateRemover.ps1 -KBNumbers "KB5063878" -Force   # Remove if still needed
 ```
