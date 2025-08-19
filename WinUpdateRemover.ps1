@@ -881,7 +881,7 @@ if ($KBNumbers) {
     Write-Host "3. Unblock previously blocked updates" -ForegroundColor White
     Write-Host "4. Check blocking status of updates" -ForegroundColor White
     Write-Host "5. Show blocking methods information" -ForegroundColor White
-    Write-Host "6. Quick Fix (repair Windows Update)" -ForegroundColor White
+    Write-Host "6. Repair Windows Update" -ForegroundColor White
     Write-Host "7. Run diagnostics" -ForegroundColor White
     Write-Host "8. Exit" -ForegroundColor Gray
     Write-Host ""
