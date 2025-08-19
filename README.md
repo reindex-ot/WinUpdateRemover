@@ -101,6 +101,11 @@ iex ((New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.co
 # Batch removal (silent)
 .\WinUpdateRemover.ps1 -KBNumbers "KB5053656","KB5055523" -Force
 
+# Check all blocked updates
+.\WinUpdateRemover.ps1 -CheckBlockStatus "all"
+# Or use A as alias
+.\WinUpdateRemover.ps1 -CheckBlockStatus "A"
+
 # Emergency workflow
 .\WinUpdateRemover.ps1 -Verify -KBNumbers "KB5063878"
 .\WinUpdateRemover.ps1 -QuickFix

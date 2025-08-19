@@ -34,7 +34,7 @@
 
 .NOTES
     Author: @danalec
-   # Version: 1.0.11
+   # Version: 1.0.12
     Requires: Administrator privileges
     
     Troubleshooting System Restore Issues:
@@ -89,7 +89,7 @@ param(
 )
 
 $Script:ScriptName = "WinUpdateRemover"
-$Script:Version = "v1.0.11"
+$Script:Version = "v1.0.12"
 $ErrorActionPreference = "Stop"
 
 # Enhanced DISM Functions for Advanced Package Management
@@ -1766,6 +1766,38 @@ function Check-UpdateBlockStatus {
     )
     
     try {
+        if ($KBNumber -eq "all" -or $KBNumber -eq "ALL") {
+            Write-Host "Checking block status for ALL updates..." -ForegroundColor Yellow
+            Write-Host ""
+            
+            # Scan all blocked updates in registry
+            $hiddenPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\HiddenUpdates"
+            $blockedUpdates = @()
+            
+            if (Test-Path $hiddenPath) {
+                $properties = Get-ItemProperty -Path $hiddenPath -ErrorAction SilentlyContinue
+                foreach ($prop in $properties.PSObject.Properties) {
+                    if ($prop.Name -match "^KB(\d+)$") {
+                        $blockedUpdates += $prop.Name
+                    }
+                }
+            }
+            
+            if ($blockedUpdates.Count -gt 0) {
+                Write-Host "=== Currently Blocked Updates ===" -ForegroundColor Red
+                foreach ($blocked in $blockedUpdates | Sort-Object) {
+                    Write-Host "[BLOCKED] $blocked" -ForegroundColor Red
+                }
+                Write-Host ""
+                Write-Host "Total blocked: $($blockedUpdates.Count) updates" -ForegroundColor Yellow
+            } else {
+                Write-Host "[INFO] No updates are currently blocked" -ForegroundColor Green
+            }
+            
+            Write-Host ""
+            return
+        }
+        
         Write-Host "Checking block status for KB$KBNumber..." -ForegroundColor Yellow
         Write-Host ""
         
@@ -1903,7 +1935,7 @@ if ($KBNumbers) {
             Write-Host "6. Repair Windows Update" -ForegroundColor White
             Write-Host "7. Run diagnostics" -ForegroundColor White
             Write-Host "8. Check Combined SSU/LCU Updates" -ForegroundColor White
-            Write-Host "9. Comprehensive Update Removability Analysis" -ForegroundColor Cyan
+            Write-Host "9. Comprehensive Update Removability Analysis" -ForegroundColor White
             Write-Host "0. Exit (or type 'q' to quit)" -ForegroundColor Gray
             Write-Host ""
             
@@ -2064,7 +2096,7 @@ if ($KBNumbers) {
             # Block updates
             Write-Host ""
             Write-Host "=== Block Updates ===" -ForegroundColor Cyan
-            Write-Host 'Enter KB numbers to block (comma-separated, e.g., KB5063878,KB1234567):' -ForegroundColor Yellow
+            Write-Host 'Enter KB numbers to block (comma-separated, e.g., KB5063878,KB1234567)' -ForegroundColor Yellow
             $kbInput = Read-Host "KB Number(s)"
             if ($kbInput) {
                 $kbs = $kbInput -split ',' | ForEach-Object { $_.Trim() }
@@ -2083,16 +2115,70 @@ if ($KBNumbers) {
             # Unblock updates
             Write-Host ""
             Write-Host "=== Unblock Updates ===" -ForegroundColor Cyan
-            Write-Host 'Enter KB numbers to unblock (comma-separated, e.g., KB5063878,KB1234567):' -ForegroundColor Yellow
-            $kbInput = Read-Host "KB Number(s)"
+            Write-Host 'Enter KB numbers to unblock (comma-separated, e.g., KB5063878,KB1234567)' -ForegroundColor Yellow
+            Write-Host "OR type 'all' or 'A' to unblock all currently blocked updates:" -ForegroundColor Green
+            $kbInput = Read-Host "KB Number(s) or 'all'"
             if ($kbInput) {
-                $kbs = $kbInput -split ',' | ForEach-Object { $_.Trim() }
-                foreach ($kb in $kbs) {
-                    $normalizedKB = Get-NormalizedKBNumber $kb
-                    if ($normalizedKB) {
-                        Unblock-UpdateKB -KBNumber $normalizedKB
+                if ($kbInput -eq "all" -or $kbInput -eq "ALL" -or $kbInput -eq "A" -or $kbInput -eq "a") {
+                    Write-Host "Scanning for blocked updates..." -ForegroundColor Yellow
+                    $blockedUpdates = @()
+                    $registryPaths = @(
+                        "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\",
+                        "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU\"
+                    )
+                    
+                    foreach ($regPath in $registryPaths) {
+                        if (Test-Path $regPath) {
+                            $wushowhide = Get-ItemProperty -Path $regPath -Name "WUServer" -ErrorAction SilentlyContinue
+                            $exclude = Get-ItemProperty -Path $regPath -Name "ExcludeWUDriversInQualityUpdate" -ErrorAction SilentlyContinue
+                        }
+                    }
+                    
+                    # Check for blocked KBs in registry
+                    $blockedKBs = @()
+                    $regPaths = @(
+                        "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\",
+                        "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU\"
+                    )
+                    
+                    foreach ($regPath in $regPaths) {
+                        if (Test-Path $regPath) {
+                            $properties = Get-ItemProperty -Path $regPath -ErrorAction SilentlyContinue
+                            foreach ($property in $properties.PSObject.Properties) {
+                                if ($property.Name -match "KB\\d+") {
+                                    $blockedKBs += $property.Name
+                                }
+                            }
+                        }
+                    }
+                    
+                    if ($blockedKBs.Count -gt 0) {
+                        Write-Host "Found $($blockedKBs.Count) blocked updates:" -ForegroundColor Green
+                        foreach ($kb in $blockedKBs) {
+                            Write-Host "  - $kb" -ForegroundColor White
+                        }
+                        
+                        $confirm = Read-Host "Unblock all $($blockedKBs.Count) updates? (y/n)"
+                        if ($confirm -eq 'y' -or $confirm -eq 'Y') {
+                            foreach ($kb in $blockedKBs) {
+                                $normalizedKB = Get-NormalizedKBNumber $kb
+                                if ($normalizedKB) {
+                                    Unblock-UpdateKB -KBNumber $normalizedKB
+                                }
+                            }
+                        }
                     } else {
-                        Write-Warning "Invalid KB format: $kb"
+                        Write-Host "No blocked updates found." -ForegroundColor Yellow
+                    }
+                } else {
+                    $kbs = $kbInput -split ',' | ForEach-Object { $_.Trim() }
+                    foreach ($kb in $kbs) {
+                        $normalizedKB = Get-NormalizedKBNumber $kb
+                        if ($normalizedKB) {
+                            Unblock-UpdateKB -KBNumber $normalizedKB
+                        } else {
+                            Write-Warning "Invalid KB format: $kb"
+                        }
                     }
                 }
             }
@@ -2102,17 +2188,22 @@ if ($KBNumbers) {
             # Check blocking status
             Write-Host ""
             Write-Host "=== Check Blocking Status ===" -ForegroundColor Cyan
-            Write-Host 'Enter KB numbers to check (comma-separated, e.g., KB5063878,KB1234567):' -ForegroundColor Yellow
-            $kbInput = Read-Host "KB Number(s)"
+            Write-Host 'Enter KB numbers to check (comma-separated, e.g., KB5063878,KB1234567)' -ForegroundColor Yellow
+            Write-Host "OR type 'all' or 'A' to check all currently blocked updates:" -ForegroundColor Green
+            $kbInput = Read-Host "KB Number(s) or 'all'"
             if ($kbInput) {
-                $kbs = $kbInput -split ',' | ForEach-Object { $_.Trim() }
-                foreach ($kb in $kbs) {
-                    $normalizedKB = Get-NormalizedKBNumber $kb
-                    if ($normalizedKB) {
-                        Check-UpdateBlockStatus -KBNumber $normalizedKB
-                        Write-Host ""
-                    } else {
-                        Write-Warning "Invalid KB format: $kb"
+                if ($kbInput -eq "all" -or $kbInput -eq "ALL" -or $kbInput -eq "A" -or $kbInput -eq "a") {
+                    Check-UpdateBlockStatus -KBNumber "all"
+                } else {
+                    $kbs = $kbInput -split ',' | ForEach-Object { $_.Trim() }
+                    foreach ($kb in $kbs) {
+                        $normalizedKB = Get-NormalizedKBNumber $kb
+                        if ($normalizedKB) {
+                            Check-UpdateBlockStatus -KBNumber $normalizedKB
+                            Write-Host ""
+                        } else {
+                            Write-Warning "Invalid KB format: $kb"
+                        }
                     }
                 }
             }
