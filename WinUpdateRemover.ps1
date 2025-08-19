@@ -34,7 +34,7 @@
 
 .NOTES
     Author: @danalec
-    Version: 1.0.15
+    Version: 1.0.16
     Requires: Administrator privileges
     
     Troubleshooting System Restore Issues:
@@ -85,11 +85,14 @@ param(
     [switch]$UnblockUpdate,
     
     [Parameter(Mandatory=$false)]
-    [switch]$CheckBlockStatus
+    [string]$CheckBlockStatus,
+    
+    [Parameter(Mandatory=$false)]
+    [switch]$a
 )
 
 $Script:ScriptName = "WinUpdateRemover"
-$Script:Version = "v1.0.15"
+$Script:Version = "v1.0.16"
 $ErrorActionPreference = "Stop"
 
 # Enhanced DISM Functions for Advanced Package Management
@@ -218,7 +221,7 @@ function Remove-DISMPackage {
 
 # Check for administrator privileges (skip for read-only operations)
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")
-$requiresAdmin = -not ($ListOnly -or $ShowBlockMethods -or $CheckBlockStatus -or $Verify)
+$requiresAdmin = -not ($ListOnly -or $ShowBlockMethods -or $CheckBlockStatus -or $Verify -or $a)
 if (-not $isAdmin -and $requiresAdmin) {
     Write-Host "================================================================" -ForegroundColor Red
     Write-Host "  ADMINISTRATOR PRIVILEGES REQUIRED" -ForegroundColor Red
@@ -1735,6 +1738,66 @@ if ($KBNumbers) {
     }
 } elseif ($ListOnly) {
     Write-Host "List-only mode: displaying updates without removal option" -ForegroundColor Cyan
+    exit 0
+} elseif ($CheckBlockStatus -or $a) {
+    # Handle CheckBlockStatus parameter
+    Write-Host "Checking blocking status of updates..." -ForegroundColor Yellow
+    Write-Host ""
+    
+    # Check if -a switch was provided or CheckBlockStatus has a value
+    if ($a -or $CheckBlockStatus -eq "all" -or $CheckBlockStatus -eq "A") {
+        Check-UpdateBlockStatus -KBNumber "all"
+    } elseif ($CheckBlockStatus) {
+        # Handle specific KB number
+        $normalizedKB = Get-NormalizedKBNumber $CheckBlockStatus
+        if ($normalizedKB) {
+            Check-UpdateBlockStatus -KBNumber $normalizedKB
+        } else {
+            Write-Warning "Invalid KB format: $CheckBlockStatus"
+        }
+    } else {
+        Write-Host "Usage: -CheckBlockStatus -a (to check all blocked updates)" -ForegroundColor Cyan
+        Write-Host "Or use: -CheckBlockStatus \"all\" or -CheckBlockStatus \"A\"" -ForegroundColor Cyan
+        Write-Host "Or use: -CheckBlockStatus \"KB1234567\" (for specific KB)" -ForegroundColor Cyan
+    }
+    exit 0
+} elseif ($BlockUpdate) {
+    # Handle BlockUpdate parameter
+    if ($KBNumbers) {
+        Write-Host "Blocking specified updates..." -ForegroundColor Yellow
+        Write-Host ""
+        
+        foreach ($kb in $KBNumbers) {
+            $normalizedKB = Get-NormalizedKBNumber $kb
+            if ($normalizedKB) {
+                Block-UpdateKB -KBNumber $normalizedKB
+            } else {
+                Write-Warning "Invalid KB format: $kb"
+            }
+        }
+    } else {
+        Write-Host "Usage: -BlockUpdate -KBNumbers \"KB1234567\"" -ForegroundColor Cyan
+        Write-Host "Or use: -BlockUpdate -KBNumbers \"KB1234567\",\"KB2345678\"" -ForegroundColor Cyan
+    }
+    exit 0
+} elseif ($UnblockUpdate) {
+    # Handle UnblockUpdate parameter
+    if ($KBNumbers) {
+        Write-Host "Unblocking specified updates..." -ForegroundColor Yellow
+        Write-Host ""
+        
+        foreach ($kb in $KBNumbers) {
+            $normalizedKB = Get-NormalizedKBNumber $kb
+            if ($normalizedKB) {
+                Unblock-UpdateKB -KBNumber $normalizedKB
+            } else {
+                Write-Warning "Invalid KB format: $kb"
+            }
+        }
+    } else {
+        Write-Host "Usage: -UnblockUpdate -KBNumbers \"KB1234567\"" -ForegroundColor Cyan
+        Write-Host "Or use: -UnblockUpdate -KBNumbers \"KB1234567\",\"KB2345678\"" -ForegroundColor Cyan
+    }
     exit 0
 } else {
         # Interactive menu - loop until user exits
