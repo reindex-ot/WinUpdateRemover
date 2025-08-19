@@ -5,7 +5,7 @@
 
 **Safely remove Windows Updates with automatic restore point protection**
 
-## ⚠️ Administrator Privileges Required
+## [!] Administrator Privileges Required
 
 **This script requires administrator privileges** for all operations except read-only functions. Run PowerShell as Administrator before using this script.
 

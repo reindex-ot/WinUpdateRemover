@@ -34,7 +34,7 @@
 
 .NOTES
     Author: @danalec
-   # Version: 1.0.13
+    Version: 1.0.15
     Requires: Administrator privileges
     
     Troubleshooting System Restore Issues:
@@ -89,7 +89,7 @@ param(
 )
 
 $Script:ScriptName = "WinUpdateRemover"
-$Script:Version = "v1.0.13"
+$Script:Version = "v1.0.15"
 $ErrorActionPreference = "Stop"
 
 # Enhanced DISM Functions for Advanced Package Management
@@ -205,7 +205,7 @@ function Remove-DISMPackage {
         87 { "Invalid parameter" }
         5 { "Access denied" }
         112 { "Insufficient disk space" }
-        default { "Unknown error (Exit code: $exitCode)" }
+                            default { "Unknown error (Exit code: $exitCode)" }
     }
     
     return [PSCustomObject]@{
@@ -703,7 +703,7 @@ function Analyze-UpdateRemovability {
         if ($isCombinedSSU) {
             $result.Category = "Combined SSU/LCU"
             $result.Removable = $false
-            $result.Method = "Manual Only"
+            $result.Method = "manual Only"
             $result.Notes = "Contains permanent Servicing Stack components - requires manual removal via Settings GUI"
             $combinedSSU += $result
         }
@@ -719,13 +719,13 @@ function Analyze-UpdateRemovability {
                     $result.Category = "Windows Update"
                     $result.Removable = $true
                     $result.Method = "WUSA"
-                    $result.Notes = "Standard Windows Update - should be removable"
+                    $result.Notes = "standard - maybe removable"
                 }
             } catch {
-                $result.Notes = "DISM check failed - may still be removable"
+                $result.Notes = "DISM check failed - maybe removable"
             }
         } else {
-            $result.Category = "Standard Update"
+            $result.Category = "standard"
             $result.Removable = $true
             $result.Method = "WUSA"
         }
@@ -771,6 +771,61 @@ function Analyze-UpdateRemovability {
         NonRemovable = $nonRemovable
         Removable = $removable
         CombinedSSU = $combinedSSU
+    }
+}
+
+# Lightweight individual KB removability check (cached version)
+function Test-KBRemovability {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$KBNumber
+    )
+    
+    # Define non-removable update categories
+    $combinedSSUUpdates = @(
+        'KB5063878', 'KB5062839', 'KB5062978', 'KB5034441', 'KB5034127',
+        'KB5031356', 'KB5029331', 'KB5028166', 'KB5027231', 'KB5025221'
+    )
+    
+    $permanentSecurityPatterns = @(
+        '^50[0-9]{4}$', '^51[0-9]{4}$', '^52[0-9]{4}$', '^53[0-9]{4}$'
+    )
+    
+    $kb = $KBNumber.ToUpper()
+    $isRemovable = $true
+    $reason = "Standard update - maybe removable via WUSA"
+    $removability = "Potentially Removable"  # Default to potentially removable
+    
+    # Quick checks for non-removable updates
+    if ($kb -in $combinedSSUUpdates) {
+        $isRemovable = $false
+        $reason = "Combined SSU/LCU package - requires manual Settings GUI removal"
+        $removability = "Not Removable"
+    }
+    
+    # Check permanent security updates
+    foreach ($pattern in $permanentSecurityPatterns) {
+        if ($kb -match $pattern) {
+            $isRemovable = $false
+            $reason = "Permanent security update flagged by Microsoft"
+            $removability = "Not Removable"
+            break
+        }
+    }
+    
+    # For standard updates, check if they're likely to be fully removable
+    if ($isRemovable) {
+        # Only mark very recent security updates as definitively removable
+        if ($kb -match '^KB51[0-9]{5}$' -or $kb -match '^KB52[0-9]{5}$') {
+            $removability = "Removable"
+            $reason = "Very recent security update - typically removable"
+        }
+        # KB50xxxx series and others remain as "Potentially Removable" (default)
+    }
+    
+    return [PSCustomObject]@{
+        Removability = $removability
+        Reason = $reason
     }
 }
 
@@ -1043,252 +1098,7 @@ function Verify-KB {
     return $found
 }
 
-# Comprehensive update removability detection function
-function Test-UpdateRemovability {
-    param()
-    
-    Write-Host "=== Update Removability Analysis ===" -ForegroundColor Cyan
-    Write-Host "Analyzing which updates can and cannot be removed..." -ForegroundColor Yellow
-    Write-Host ""
-    
-    # Define non-removable update categories
-    $combinedSSUUpdates = @(
-        'KB5063878', 'KB5062839', 'KB5062978', 'KB5034441', 'KB5034127',
-        'KB5031356', 'KB5029331', 'KB5028166', 'KB5027231', 'KB5025221'
-    )
-    
-    $permanentSecurityPatterns = @(
-        '^50[0-9]{4}$', '^51[0-9]{4}$', '^52[0-9]{4}$', '^53[0-9]{4}$'
-    )
-    
-    $defenderPatterns = @(
-        'Definition', 'Security Intelligence', 'Antivirus', 'Antimalware'
-    )
-    
-    $ssuPatterns = @(
-        'Servicing Stack', 'SSU', 'ServicingStack'
-    )
-    
-    $systemComponents = @(
-        'Universal C Runtime', 'Windows Recovery Environment', 'BIOS', 'Firmware',
-        'Windows Activation Technologies', 'KB971033', 'KB890830'
-    )
-    
-    # Get installed updates from multiple sources
-    $allUpdates = @()
-    
-    # Method 1: Get-HotFix
-    try {
-        $hotFixUpdates = Get-HotFix -ErrorAction SilentlyContinue | Where-Object { $_.HotFixID -match 'KB\d+' }
-        $allUpdates += $hotFixUpdates
-    } catch {
-        Write-Host "Warning: Could not retrieve updates via Get-HotFix" -ForegroundColor Yellow
-    }
-    
-    # Method 2: DISM packages
-    try {
-        $dismOutput = dism /online /get-packages 2>$null
-        if ($dismOutput) {
-            $packageLines = $dismOutput -join "`n" -split "Package Identity :"
-            foreach ($package in $packageLines) {
-                if ($package -match "(.+)") {
-                    $packageName = $matches[1].Trim()
-                    if ($packageName -match "KB\d+") {
-                        $allUpdates += [PSCustomObject]@{
-                            HotFixID = ($packageName -split '~')[0]
-                            InstalledOn = (Get-Date)
-                            Description = "DISM Package: $packageName"
-                        }
-                    }
-                }
-            }
-        }
-    } catch {
-        Write-Host "Warning: Could not retrieve DISM package list" -ForegroundColor Yellow
-    }
-    
-    # Method 3: Registry
-    try {
-        $regPaths = @(
-            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\Packages",
-            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
-        )
-        
-        foreach ($regPath in $regPaths) {
-            if (Test-Path $regPath) {
-                $regItems = Get-ChildItem -Path $regPath -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "KB\d+" }
-                foreach ($item in $regItems) {
-                    $kbMatch = $item.Name -match "(KB\d+)"
-                    if ($kbMatch) {
-                        $kb = $matches[1]
-                        $allUpdates += [PSCustomObject]@{
-                            HotFixID = $kb
-                            InstalledOn = $item.LastWriteTime
-                            Description = "Registry Package: $kb"
-                        }
-                    }
-                }
-            }
-        }
-    } catch {
-        Write-Host "Warning: Could not retrieve registry updates" -ForegroundColor Yellow
-    }
-    
-    # Remove duplicates and process
-    $uniqueUpdates = $allUpdates | Group-Object HotFixID | ForEach-Object { $_.Group[0] }
-    
-    $analysisResults = @()
-    
-    foreach ($update in $uniqueUpdates) {
-        $kb = $update.HotFixID.ToUpper()
-        $isRemovable = $true
-        $reason = "Potentially removable"
-        $category = "Standard"
-        
-        # Check combined SSU/LCU
-        if ($kb -in $combinedSSUUpdates) {
-            $isRemovable = $false
-            $reason = "Combined SSU/LCU package - requires manual Settings GUI removal"
-            $category = "Combined SSU/LCU"
-        }
-        
-        # Check permanent security updates
-        foreach ($pattern in $permanentSecurityPatterns) {
-            if ($kb -match $pattern) {
-                $isRemovable = $false
-                $reason = "Permanent security update flagged by Microsoft"
-                $category = "Permanent Security"
-                break
-            }
-        }
-        
-        # Check Defender updates
-        foreach ($pattern in $defenderPatterns) {
-            if ($update.Description -match $pattern) {
-                $isRemovable = $false
-                $reason = "Microsoft Defender definition update (auto-updated)"
-                $category = "Defender Definition"
-                break
-            }
-        }
-        
-        # Check SSU updates
-        foreach ($pattern in $ssuPatterns) {
-            if ($update.Description -match $pattern -or $kb -match "SSU") {
-                $isRemovable = $false
-                $reason = "Servicing Stack Update (permanent system component)"
-                $category = "Servicing Stack"
-                break
-            }
-        }
-        
-        # Check system components
-        foreach ($component in $systemComponents) {
-            if ($update.Description -match $component) {
-                $isRemovable = $false
-                $reason = "Critical system component (permanent)"
-                $category = "System Component"
-                break
-            }
-        }
-        
-        # Test removability via non-destructive methods
-        if ($isRemovable) {
-            try {
-                $kbNumber = $kb.Replace("KB", "")
-                
-                # Use DISM to check if package exists and is uninstallable
-                $dismOutput = dism /online /get-packages | Where-Object { $_ -match "Package_for_KB$kbNumber" }
-                if ($dismOutput) {
-                    $reason = "Update appears removable (DISM verification)"
-                    $isRemovable = $true
-                } else {
-                    # Check Windows Update history for uninstallability
-                    try {
-                        $session = New-Object -ComObject "Microsoft.Update.Session"
-                        $searcher = $session.CreateUpdateSearcher()
-                        $history = $searcher.GetTotalHistoryCount()
-                        if ($history -gt 0) {
-                            $updates = $searcher.QueryHistory(0, [Math]::Min($history, 100)) | Where-Object { $_.Title -like "*$kb*" }
-                            if ($updates) {
-                                $reason = "Update found in history (may be removable)"
-                                $isRemovable = $true
-                            } else {
-                                $reason = "Update removability cannot be determined"
-                                $isRemovable = $false
-                                $category = "Unknown"
-                            }
-                        } else {
-                            $reason = "No update history available"
-                            $isRemovable = $false
-                            $category = "No History"
-                        }
-                    } catch {
-                        $reason = "Update appears in system (registry/DISM)"
-                        $isRemovable = $true
-                    }
-                }
-            } catch {
-                $reason = "Could not verify removability (system restriction)"
-                $isRemovable = $false
-                $category = "Restricted"
-            }
-        }
-        
-        $analysisResults += [PSCustomObject]@{
-            KB = $kb
-            InstalledDate = $update.InstalledOn
-            Description = $update.Description
-            IsRemovable = $isRemovable
-            Reason = $reason
-            Category = $category
-        }
-    }
-    
-    # Display results
-    $nonRemovable = $analysisResults | Where-Object { -not $_.IsRemovable }
-    $removable = $analysisResults | Where-Object { $_.IsRemovable }
-    $combinedSSU = $analysisResults | Where-Object { $_.Category -eq "Combined SSU/LCU" }
-    
-    Write-Host "=== ANALYSIS RESULTS ===" -ForegroundColor Cyan
-    Write-Host "Total Updates Found: $($analysisResults.Count)" -ForegroundColor White
-    Write-Host "Removable: $($removable.Count)" -ForegroundColor Green
-    Write-Host "Non-Removable: $($nonRemovable.Count)" -ForegroundColor Red
-    Write-Host ""
-    
-    if ($combinedSSU.Count -gt 0) {
-        Write-Host "  COMBINED SSU/LCU UPDATES DETECTED " -ForegroundColor Red -BackgroundColor Black
-        foreach ($update in $combinedSSU) {
-            Write-Host "  - $($update.KB) - $($update.Reason)" -ForegroundColor Red
-            Write-Host "    Installed: $($update.InstalledDate)" -ForegroundColor Gray
-        }
-        Write-Host ""
-    }
-    
-    if ($nonRemovable.Count -gt 0) {
-        Write-Host " NON-REMOVABLE UPDATES:" -ForegroundColor Yellow
-        $categories = $nonRemovable | Group-Object Category
-        foreach ($category in $categories) {
-            Write-Host "  $($category.Name): $($category.Count) updates" -ForegroundColor Yellow
-        }
-        Write-Host ""
-    }
-    
-    if ($removable.Count -gt 0) {
-        Write-Host " REMOVABLE UPDATES:" -ForegroundColor Green
-        foreach ($update in $removable) {
-            Write-Host "  - $($update.KB) - $($update.Description)" -ForegroundColor Green
-        }
-        Write-Host ""
-    }
-    
-    return @{
-        AllResults = $analysisResults
-        NonRemovable = $nonRemovable
-        Removable = $removable
-        CombinedSSU = $combinedSSU
-    }
-}
+
 
 # Function to detect combined SSU/LCU updates that require manual removal
 function Test-CombinedSSUUpdates {
@@ -1588,20 +1398,37 @@ function Invoke-Diagnostic {
     
     # 3. Check for pending updates
     Write-Host "3. Checking for pending Windows Updates..." -ForegroundColor Yellow
+    Write-Host "   (Press Ctrl+C to cancel if this takes too long)" -ForegroundColor Gray
     try {
-        $session = New-Object -ComObject "Microsoft.Update.Session"
-        $searcher = $session.CreateUpdateSearcher()
-        $pending = $searcher.Search("IsInstalled=0")
-        Write-Host "   [INFO] Pending updates: $($pending.Updates.Count)" -ForegroundColor Cyan
-        if ($pending.Updates.Count -gt 0) {
-            $maxDisplay = [Math]::Min(5, $pending.Updates.Count)
-            for ($i = 0; $i -lt $maxDisplay; $i++) {
-                Write-Host "   - $($pending.Updates.Item($i).Title)" -ForegroundColor Gray
-            }
-            if ($pending.Updates.Count -gt 5) {
-                Write-Host "   ... and $($pending.Updates.Count - 5) more" -ForegroundColor Gray
-            }
+        $job = Start-Job -ScriptBlock {
+            $session = New-Object -ComObject "Microsoft.Update.Session"
+            $searcher = $session.CreateUpdateSearcher()
+            $pending = $searcher.Search("IsInstalled=0")
+            return $pending
         }
+        
+        $timeout = 30 # 30 seconds timeout
+        $completed = Wait-Job $job -Timeout $timeout
+        
+        if ($completed) {
+            $pending = Receive-Job $job
+            Write-Host "   [INFO] Pending updates: $($pending.Updates.Count)" -ForegroundColor Cyan
+            if ($pending.Updates.Count -gt 0) {
+                $maxDisplay = [Math]::Min(5, $pending.Updates.Count)
+                for ($i = 0; $i -lt $maxDisplay; $i++) {
+                    Write-Host "   - $($pending.Updates.Item($i).Title)" -ForegroundColor Gray
+                }
+                if ($pending.Updates.Count -gt 5) {
+                    Write-Host "   ... and $($pending.Updates.Count - 5) more" -ForegroundColor Gray
+                }
+            }
+        } else {
+            Write-Host "   [WARN] Pending updates check timed out after $timeout seconds" -ForegroundColor Yellow
+            Write-Host "   This may indicate Windows Update service issues" -ForegroundColor Gray
+            Stop-Job $job
+        }
+        
+        Remove-Job $job -Force
     } catch {
         Write-Host "   [FAIL] Error checking pending updates: $($_.Exception.Message)" -ForegroundColor Red
     }
@@ -1873,15 +1700,15 @@ for ($i = 0; $i -lt $installedUpdates.Count; $i++) {
     $isCombinedSSU = $normalizedKB -and ($combinedSSUUpdates -contains $normalizedKB)
     
     if ($isCombinedSSU) {
-        Write-Host "[$($i+1)] $($update.HotFixID) - $($update.Description) (Installed: $installDate)" -ForegroundColor Red -BackgroundColor Yellow
+        Write-Host "[$($i+1)] $($update.HotFixID) - $($update.Description) $installDate" -ForegroundColor Red -BackgroundColor Yellow
         Write-Host "      *** COMBINED SSU/LCU UPDATE - MANUAL REMOVAL ONLY ***" -ForegroundColor Red -BackgroundColor Yellow
         $problematicCount++
     } elseif ($isProblematic) {
-        Write-Host "[$($i+1)] $($update.HotFixID) - $($update.Description) (Installed: $installDate)" -ForegroundColor Red -BackgroundColor Yellow
+        Write-Host "[$($i+1)] $($update.HotFixID) - $($update.Description) $installDate" -ForegroundColor Red -BackgroundColor Yellow
         Write-Host "      *** PROBLEMATIC UPDATE DETECTED ***" -ForegroundColor Red -BackgroundColor Yellow
         $problematicCount++
     } else {
-        Write-Host "[$($i+1)] $($update.HotFixID) - $($update.Description) (Installed: $installDate)" -ForegroundColor White
+        Write-Host "[$($i+1)] $($update.HotFixID) - $($update.Description) $installDate" -ForegroundColor White
     }
 }
 
@@ -1927,22 +1754,20 @@ if ($KBNumbers) {
             Write-Host ""
             Write-Host "=== Interactive Menu ===" -ForegroundColor Cyan
             Write-Host "Choose an action:" -ForegroundColor Yellow
-            Write-Host "1. Remove installed updates" -ForegroundColor White
+            Write-Host "1. List installed updates" -ForegroundColor White
             Write-Host "2. Block specific updates from installing" -ForegroundColor White
             Write-Host "3. Unblock previously blocked updates" -ForegroundColor White
             Write-Host "4. Check blocking status of updates" -ForegroundColor White
             Write-Host "5. Show blocking methods information" -ForegroundColor White
             Write-Host "6. Repair Windows Update" -ForegroundColor White
             Write-Host "7. Run diagnostics" -ForegroundColor White
-            Write-Host "8. Check Combined SSU/LCU Updates" -ForegroundColor White
-            Write-Host "9. Comprehensive Update Removability Analysis" -ForegroundColor White
             Write-Host "0. Exit (or type 'q' to quit)" -ForegroundColor Gray
             Write-Host ""
             
-            $menuChoice = Read-Host "Enter your choice (0-9 or q to quit)"
+            $menuChoice = Read-Host "Enter your choice (0-7 or q to quit)"
             
             switch ($menuChoice) {
-        "1" {
+                "1" {
             # Original update removal functionality
             Write-Host ""
             Write-Host "Scanning for installed updates..." -ForegroundColor Yellow
@@ -1958,40 +1783,71 @@ if ($KBNumbers) {
                     continue
                 }
                 
-                # Display updates with numbers
+                # Cache removability results to avoid redundant checks
+                $removabilityCache = @{}
+                
                 Write-Host "Installed Updates:" -ForegroundColor Cyan
                 Write-Host "==================" -ForegroundColor Cyan
+                Write-Host "Removability Status: [OK] Removable [!] Potentially Removable [X] Not Removable" -ForegroundColor Gray
+                Write-Host ""
+                
+                # Pre-calculate all removability results
+                $removabilityResults = @()
+                for ($i = 0; $i -lt $installedUpdates.Count; $i++) {
+                    $update = $installedUpdates[$i]
+                    $kbNumber = Get-NormalizedKBNumber $update.HotFixID
+                    
+                    if (-not $removabilityCache.ContainsKey($kbNumber)) {
+                        $removabilityCache[$kbNumber] = Test-KBRemovability -KBNumber $kbNumber
+                    }
+                    
+                    $removabilityResults += $removabilityCache[$kbNumber]
+                }
+                
+                # Display updates with cached removability results
                 for ($i = 0; $i -lt $installedUpdates.Count; $i++) {
                     $update = $installedUpdates[$i]
                     $installedDate = if ($update.InstalledOn) { $update.InstalledOn.ToString("yyyy-MM-dd") } else { "Unknown" }
                     $kbNumber = Get-NormalizedKBNumber $update.HotFixID
+                    $removability = $removabilityResults[$i]
                     
-                    # Check if this is a problematic/critical KB
-                    $isCritical = $false
-                    $isCombinedSSU = $false
-                    
-                    foreach ($problematicKB in $problematicKBs) {
-                        if ($problematicKB -like "*$kbNumber*") {
-                            $isCritical = $true
-                            if ($problematicKB -like "*Combined SSU/LCU*") {
-                                $isCombinedSSU = $true
-                            }
-                            break
+                    # Determine display based on removability
+                    switch ($removability.Removability) {
+                        'Removable' {
+                            $status = "[OK]"
+                            $color = "Green"
+                        }
+                        'Potentially Removable' {
+                            $status = "[!]"
+                            $color = "Yellow"
+                        }
+                        'Not Removable' {
+                            $status = "[X]"
+                            $color = "Red"
+                        }
+                        default {
+                            $status = "[?]"
+                            $color = "White"
                         }
                     }
                     
-                    if ($isCritical) {
-                        $color = if ($isCombinedSSU) { "Red" } else { "Yellow" }
-                        $prefix = if ($isCombinedSSU) { "[CRITICAL] " } else { "[WARNING] " }
-                        Write-Host "$($i+1). $prefix$($update.HotFixID) - $($update.Description) (Installed: $installedDate)" -ForegroundColor $color
-                    } else {
-                        Write-Host "$($i+1). $($update.HotFixID) - $($update.Description) (Installed: $installedDate)" -ForegroundColor White
+                    # Add reason if not removable
+                    $reason = ""
+                    if ($removability.Removability -eq 'Not Removable' -and $removability.Reason) {
+                        $reason = " - $($removability.Reason)"
+                    } elseif ($removability.Removability -eq 'Potentially Removable' -and $removability.Reason) {
+                        $reason = " - $($removability.Reason)"
                     }
+                    
+                    Write-Host "$($i+1). $status $($update.HotFixID) - $($update.Description) $installedDate$reason" -ForegroundColor $color
                 }
                 Write-Host ""
                 
+                # Use all installed updates without filtering
+                $filteredUpdates = $installedUpdates
+                
                 Write-Host "Select updates to remove:" -ForegroundColor Yellow
-                Write-Host '- Enter numbers separated by commas (e.g., 1,3,5)' -ForegroundColor Gray
+                Write-Host '- Enter numbers separated by commas (e.g., 1,3,5)' -ForegroundColor Yellow
                 Write-Host "- Enter 'all' or 'A' to select all updates" -ForegroundColor Gray
                 Write-Host "- Enter 'back' or 'b' to return to main menu" -ForegroundColor Gray
 
@@ -2004,12 +1860,12 @@ if ($KBNumbers) {
                 # Parse selection
                 $updatesToProcess = @()
                 if ($selection -eq 'all' -or $selection -eq 'A') {
-                    $updatesToProcess = $installedUpdates
+                    $updatesToProcess = $filteredUpdates
                 } else {
                     $indices = $selection -split ',' | ForEach-Object { $_.Trim() }
                     foreach ($index in $indices) {
-                        if ($index -match '^\d+$' -and [int]$index -ge 1 -and [int]$index -le $installedUpdates.Count) {
-                            $updatesToProcess += $installedUpdates[[int]$index - 1]
+                        if ($index -match '^\d+$' -and [int]$index -ge 1 -and [int]$index -le $filteredUpdates.Count) {
+                            $updatesToProcess += $filteredUpdates[[int]$index - 1]
                         } else {
                             Write-Warning "Invalid selection: $index"
                         }
@@ -2022,10 +1878,67 @@ if ($KBNumbers) {
                     continue
                 }
                 
-                # Validate selected updates for combined SSU/LCU packages
+                # Validate selected updates using cached removability results
                 $selectedKBs = $updatesToProcess | ForEach-Object { Get-NormalizedKBNumber $_.HotFixID }
-                if (-not (Validate-KBInput -KBNumbers $selectedKBs)) {
-                    Write-Host "Validation failed. Returning to menu..." -ForegroundColor Yellow
+                
+                # Check for non-removable updates and warn user
+                $nonRemovableCount = 0
+                $combinedSSUCount = 0
+                $warnings = @()
+                
+                foreach ($update in $updatesToProcess) {
+                    $kbNumber = Get-NormalizedKBNumber $update.HotFixID
+                    $removability = $removabilityCache[$kbNumber]
+                    
+                    if ($removability.Removability -eq 'Not Removable') {
+                        $nonRemovableCount++
+                        $warnings += "$($update.HotFixID): $($removability.Reason)"
+                    } elseif ($removability.Removability -eq 'Potentially Removable') {
+                        $warnings += "$($update.HotFixID): $($removability.Reason)"
+                    }
+                    
+                    # Count combined SSU/LCU packages
+                    foreach ($problematicKB in $problematicKBs) {
+                        if ($problematicKB -like "*$kbNumber*" -and $problematicKB -like "*Combined SSU/LCU*") {
+                            $combinedSSUCount++
+                            break
+                        }
+                    }
+                }
+                
+                if ($nonRemovableCount -gt 0) {
+                    Write-Host "`n[!] WARNING: $nonRemovableCount selected update(s) cannot be removed:" -ForegroundColor Red
+                    foreach ($warning in $warnings) {
+                        Write-Host "   - $warning" -ForegroundColor Yellow
+                    }
+                    
+                    $continue = Read-Host "Continue with removable updates only? (y/n)"
+                    if ($continue -ne 'y') {
+                        Write-Host "Operation cancelled." -ForegroundColor Yellow
+                        Read-Host "Press Enter to continue"
+                        continue
+                    }
+                    
+                    # Filter out non-removable updates using cached results
+                    $updatesToProcess = $updatesToProcess | Where-Object {
+                        $kbNumber = Get-NormalizedKBNumber $_.HotFixID
+                        $removabilityCache[$kbNumber].Removability -ne 'Not Removable'
+                    }
+                }
+                
+                if ($combinedSSUCount -gt 0) {
+                    Write-Host "`n[!] NOTE: $combinedSSUCount selected update(s) are Combined SSU/LCU packages." -ForegroundColor Yellow
+                    Write-Host "   These often require special handling and may fail to remove." -ForegroundColor Gray
+                    $continue = Read-Host "Continue anyway? (y/n)"
+                    if ($continue -ne 'y') {
+                        Write-Host "Operation cancelled." -ForegroundColor Yellow
+                        Read-Host "Press Enter to continue"
+                        continue
+                    }
+                }
+                
+                if ($updatesToProcess.Count -eq 0) {
+                    Write-Host "No removable updates selected." -ForegroundColor Yellow
                     Read-Host "Press Enter to continue"
                     continue
                 }
@@ -2038,9 +1951,22 @@ if ($KBNumbers) {
 
                 # Create restore point
                 Write-Host "Creating a restore point before making changes..." -ForegroundColor Yellow
+            } catch {
+                Write-Host "Error scanning for updates: $($_.Exception.Message)" -ForegroundColor Red
+                Write-Host "Attempting to continue with basic update list..." -ForegroundColor Yellow
+                # Fallback to basic list if advanced scanning fails
+                try {
+                    $installedUpdates = Get-HotFix | Where-Object { $_.HotFixID -match 'KB\d+' } | Sort-Object {[DateTime]$_.InstalledOn} -Descending
+                    Write-Host "Successfully retrieved basic update list" -ForegroundColor Green
+                } catch {
+                    Write-Host "Failed to retrieve any updates: $($_.Exception.Message)" -ForegroundColor Red
+                    Read-Host "Press Enter to continue"
+                    continue
+                }
+            }
                 
-                $rpName = "${Script:ScriptName}_Backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
-                $Script:rpCreated = $false
+            $rpName = "${Script:ScriptName}_Backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+            $Script:rpCreated = $false
                 
                 try {
                     $systemDrive = $env:SystemDrive
@@ -2098,8 +2024,72 @@ if ($KBNumbers) {
                     Write-Host "`nProcessing $($update.HotFixID)..." -ForegroundColor Cyan
                     
                     try {
-                        Remove-WindowsUpdate -KBNumber $kbNumber -Force:$false
-                        Write-Host "Successfully processed $($update.HotFixID)" -ForegroundColor Green
+                        # Process removal using the comprehensive removal logic
+                        $removeSuccess = $false
+                        $removalMethods = @()
+                        $errorDetails = @()
+                        
+                        Write-Host "Removing $($update.HotFixID)..." -ForegroundColor Red
+                        
+                        # Method 1: Universal WUSA approach (fastest, try first)
+                        Write-Host "Trying Windows Update Standalone Installer (WUSA)..." -ForegroundColor Gray
+                        $cleanKB = $kbNumber -replace "^KB", ""
+                        $wusaArgs = "/uninstall", "/kb:$cleanKB", "/quiet", "/norestart"
+                        $wusaProcess = Start-Process -FilePath "wusa.exe" -ArgumentList $wusaArgs -Wait -PassThru -NoNewWindow
+                        
+                        if ($wusaProcess.ExitCode -eq 0 -or $wusaProcess.ExitCode -eq 3010) {
+                            $removeSuccess = $true
+                            $removalMethods += "WUSA"
+                            Write-Host "Successfully removed via WUSA" -ForegroundColor Green
+                        } else {
+                            $wusaError = switch ($wusaProcess.ExitCode) {
+                                5 { "Access denied - requires administrator privileges" }
+                                87 { "Invalid parameter - KB may not exist or format incorrect" }
+                                2359302 { "Update not found or not applicable - may be combined SSU/LCU package" }
+                                3010 { "Success, restart required" }
+                                default { "WUSA error code: $($wusaProcess.ExitCode)" }
+                            }
+                            Write-Host "   [!] WUSA failed: $wusaError" -ForegroundColor Yellow
+                            $errorDetails += "WUSA: $wusaError"
+                        }
+
+                        # Method 2: DISM approach (fallback)
+                        if (-not $removeSuccess) {
+                            Write-Host "Trying DISM package discovery..." -ForegroundColor Gray
+                            $dismAvailable = Get-Command "dism.exe" -ErrorAction SilentlyContinue
+                            if ($dismAvailable) {
+                                try {
+                                    $dismOutput = & dism /online /get-packages /format:table 2>$null
+                                    $kbPackages = $dismOutput | Where-Object { $_ -match "Package.*KB$cleanKB" -or $_ -match "KB$cleanKB.*Package" }
+                                    
+                                    if ($kbPackages) {
+                                        foreach ($packageLine in $kbPackages) {
+                                            if ($packageLine -match "Package Identity : (.*)") {
+                                                $packageName = $matches[1].Trim()
+                                                Write-Host "Testing package: $packageName" -ForegroundColor Gray
+                                                
+                                                # Use Remove-DISMPackage function
+                                                $result = Remove-DISMPackage -PackageName $packageName -Quiet -NoRestart
+                                                if ($result.Success) {
+                                                    $removeSuccess = $true
+                                                    $removalMethods += "DISM ($packageName)"
+                                                    Write-Host "   $($result.Message)" -ForegroundColor Green
+                                                    break
+                                                }
+                                            }
+                                        }
+                                    }
+                                } catch {
+                                    Write-Host "   [!] DISM search error: $($_.Exception.Message)" -ForegroundColor Yellow
+                                }
+                            }
+                        }
+
+                        if ($removeSuccess) {
+                            Write-Host "Successfully processed $($update.HotFixID)" -ForegroundColor Green
+                        } else {
+                            Write-Host "Failed to process $($update.HotFixID)" -ForegroundColor Red
+                        }
                     } catch {
                         Write-Host "Failed to process $($update.HotFixID): $($_.Exception.Message)" -ForegroundColor Red
                     }
@@ -2113,13 +2103,19 @@ if ($KBNumbers) {
                 Read-Host "Press Enter to continue"
                 continue
             }
-        }
+        
         "2" {
             # Block updates
             Write-Host ""
             Write-Host "=== Block Updates ===" -ForegroundColor Cyan
-            Write-Host 'Enter KB numbers to block (comma-separated, e.g., KB5063878,KB1234567)' -ForegroundColor Yellow
+            Write-Host "- Enter 'back' or 'b' to return to main menu" -ForegroundColor Gray
+            Write-Host "- Enter KB numbers to block (comma-separated, e.g., KB5063878,KB1234567)" -ForegroundColor Yellow
             $kbInput = Read-Host "KB Number(s)"
+            
+            if ($kbInput -eq 'back' -or $kbInput -eq 'b') {
+                continue
+            }
+            
             if ($kbInput) {
                 $kbs = $kbInput -split ',' | ForEach-Object { $_.Trim() }
                 foreach ($kb in $kbs) {
@@ -2137,9 +2133,15 @@ if ($KBNumbers) {
             # Unblock updates
             Write-Host ""
             Write-Host "=== Unblock Updates ===" -ForegroundColor Cyan
-            Write-Host 'Enter KB numbers to unblock (comma-separated, e.g., KB5063878,KB1234567)' -ForegroundColor Yellow
-            Write-Host "OR type 'all' or 'A' to unblock all currently blocked updates:" -ForegroundColor Green
+            Write-Host "- Enter 'back' or 'b' to return to main menu" -ForegroundColor Gray
+            Write-Host "- Enter 'all' or 'A' to unblock all currently blocked updates:" -ForegroundColor Green
+            Write-Host '- Enter KB numbers to unblock (comma-separated, e.g., KB5063878,KB1234567)' -ForegroundColor Yellow
             $kbInput = Read-Host "KB Number(s) or 'all'"
+            
+            if ($kbInput -eq 'back' -or $kbInput -eq 'b') {
+                continue
+            }
+            
             if ($kbInput) {
                 if ($kbInput -eq "all" -or $kbInput -eq "ALL" -or $kbInput -eq "A" -or $kbInput -eq "a") {
                     Write-Host "Scanning for blocked updates..." -ForegroundColor Yellow
@@ -2206,13 +2208,21 @@ if ($KBNumbers) {
             }
             Read-Host "Press Enter to continue"
         }
-        "4" {
+            "4" {
             # Check blocking status
             Write-Host ""
             Write-Host "=== Check Blocking Status ===" -ForegroundColor Cyan
-            Write-Host 'Enter KB numbers to check (comma-separated, e.g., KB5063878,KB1234567)' -ForegroundColor Yellow
-            Write-Host "OR type 'all' or 'A' to check all currently blocked updates:" -ForegroundColor Green
+            Write-Host "- Enter 'back' or 'b' to return to main menu" -ForegroundColor Gray
+            Write-Host "- Enter 'all' or 'A' to check all currently blocked updates:" -ForegroundColor Green
+            Write-Host '- Enter KB numbers to check (comma-separated, e.g., KB5063878,KB1234567)' -ForegroundColor Yellow
+
+
             $kbInput = Read-Host "KB Number(s) or 'all'"
+            
+            if ($kbInput -eq 'back' -or $kbInput -eq 'b') {
+                continue
+            }
+            
             if ($kbInput) {
                 if ($kbInput -eq "all" -or $kbInput -eq "ALL" -or $kbInput -eq "A" -or $kbInput -eq "a") {
                     Check-UpdateBlockStatus -KBNumber "all"
@@ -2231,53 +2241,32 @@ if ($KBNumbers) {
             }
             Read-Host "Press Enter to continue"
         }
-        "5" {
+            "5" {
             # Show blocking methods
             Show-BlockingMethods
             Write-Host ""
             Read-Host "Press Enter to continue"
         }
-        "6" {
+            "6" {
              # Repair Windows Update
             Invoke-QuickFix
             Read-Host "Press Enter to continue"
         }
-        "7" {
+            "7" {
             # Diagnostics
             Invoke-Diagnostic
             Read-Host "Press Enter to continue"
         }
-        "8" {
-            # Check Combined SSU/LCU Updates
-            Test-CombinedSSUUpdates
-            Read-Host "Press Enter to continue"
-        }
-        "9" {
-            # Comprehensive Update Removability Analysis
-            Write-Host ""
-            Write-Host "=== Comprehensive Update Removability Analysis ===" -ForegroundColor Cyan
-            $removabilityResults = Test-UpdateRemovability
-            
-            if ($removabilityResults.NonRemovable.Count -eq 0) {
-                Write-Host "All installed updates appear to be removable via standard methods." -ForegroundColor Green
-            } else {
-                Write-Host "Found $($removabilityResults.NonRemovable.Count) non-removable update(s):" -ForegroundColor Yellow
-                Write-Host ""
-                $removabilityResults.NonRemovable | Format-Table KB, Reason, InstalledDate -AutoSize | Out-Host
-                Write-Host ""
-                Write-Host 'Note: These updates require manual removal via Settings > Update & Security > Windows Update > Update History > Uninstall Updates' -ForegroundColor Cyan
-            }
-            Read-Host "Press Enter to continue"
-        }
-        "0" {
+
+            "0" {
             Write-Host "Exiting..." -ForegroundColor Yellow
             exit 0
         }
-        "q" {
+            "q" {
             Write-Host "Exiting..." -ForegroundColor Yellow
             exit 0
         }
-        "Q" {
+            "Q" {
             Write-Host "Exiting..." -ForegroundColor Yellow
             exit 0
         }
@@ -2285,7 +2274,8 @@ if ($KBNumbers) {
             Write-Warning "Invalid choice. Please select 0-9 or type 'q' to quit."
             Read-Host "Press Enter to continue"
         }
-    } } while ($menuChoice -notin @("0", "q", "Q"))
+    }
+} while ($menuChoice -notin @("0", "q", "Q"))
     exit 0  # Exit after interactive menu completes
 }
 
