@@ -1,10 +1,23 @@
 <#
 .SYNOPSIS
-    Windows Update Remover - Remove specific Windows updates
+    Windows Update Remover - Safely remove problematic Windows Updates with automatic restore point protection
 
 .DESCRIPTION
-    This script allows you to view and selectively remove Windows updates.
-    It creates a system restore point before making changes for safety.
+    WinUpdateRemover is an interactive PowerShell tool designed to help Windows administrators and power users safely remove problematic Windows Updates that may cause system instability, performance issues, or hardware problems.
+    
+    Features:
+    - Safe Removal Process: Automatic System Restore point creation before any changes
+    - Targeted Removal: Remove specific problematic updates (like KB5063878 causing SSD issues)
+    - Enhanced Error Handling: Improved handling for 0x800f0805 and other common errors
+    - Multi-Method Removal: Four different removal approaches (DISM auto-detect, DISM standard, WUSA, Windows Update API)
+    - Smart Detection: Automatically checks if updates are installed before attempting removal
+    - Interactive Mode: Step-by-step guidance with confirmation prompts
+    
+    Usage Examples:
+    - Interactive: .\WinUpdateRemover.ps1
+    - Specific KB: .\WinUpdateRemover.ps1 -KBNumbers "KB5063878"
+    - Force Mode: .\WinUpdateRemover.ps1 -Force
+    - List Only: .\WinUpdateRemover.ps1 -ListOnly
 
 .NOTES
     Author: @danalec
@@ -29,7 +42,7 @@ param(
 )
 
 $Script:ScriptName = "WinUpdateRemover"
-$Script:Version = "1.0.1"
+$Script:Version = "v1.0.1"
 $ErrorActionPreference = "Stop"
 
 # Check for administrator privileges
@@ -42,7 +55,7 @@ if (-not $isAdmin) {
 # Display header
 Clear-Host
 Write-Host "====================================" -ForegroundColor Cyan
-Write-Host "    Windows Update Remover v$($Script:Version)" -ForegroundColor White
+Write-Host "    Windows Update Remover $($Script:Version)" -ForegroundColor White
 Write-Host "====================================" -ForegroundColor Cyan
 Write-Host ""
 

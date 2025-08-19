@@ -3,12 +3,12 @@
 [![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-blue.svg)](https://docs.microsoft.com/en-us/powershell/)
 [![Windows](https://img.shields.io/badge/Windows-10%2F11-brightgreen.svg)](https://www.microsoft.com/windows)
 [![License](https://img.shields.io/badge/License-Unlicense-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-1.2-red.svg)](https://github.com/danalec/WinUpdateRemover/releases)
+[![Version](https://img.shields.io/badge/Version-v1.0.1-red.svg)](https://github.com/danalec/WinUpdateRemover/releases)
 [![Author](https://img.shields.io/badge/Author-@danalec-orange.svg)](https://github.com/danalec)
 
 > **Safely remove problematic Windows Updates with automatic restore point protection**
 
-WinUpdateRemover is an interactive PowerShell tool designed to help Windows administrators and power users safely remove problematic Windows Updates that may cause system instability, performance issues, or hardware problems.
+WinUpdateRemover is an interactive PowerShell tool designed to help Windows administrators and power users safely remove problematic Windows Updates that may cause system instability, performance issues, or hardware problems. It provides a safe and guided approach to update removal, with automatic System Restore point creation and enhanced error handling.
 
 ## Features
 
