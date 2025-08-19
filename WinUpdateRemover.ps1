@@ -7,7 +7,7 @@
     
     Features:
     - Safe Removal Process: Automatic System Restore point creation before any changes
-    - Targeted Removal: Remove specific problematic updates (like KB5063878 causing SSD issues)
+    - Targeted Removal: Remove specific problematic updates
     - Update Blocking: Prevent specific updates from being installed via registry-based blocking
     - Enhanced Error Handling: Improved handling for 0x800f0805 and other common errors
     - Multi-Method Removal: Four different removal approaches (DISM auto-detect, DISM standard, WUSA, Windows Update API)
@@ -20,21 +20,21 @@
     
     Usage Examples:
     - Interactive: .\WinUpdateRemover.ps1
-    - Specific KB: .\WinUpdateRemover.ps1 -KBNumbers "KB5063878"
+    - Specific KB: .\WinUpdateRemover.ps1 -KBNumbers "KB5055523"
     - Force Mode: .\WinUpdateRemover.ps1 -Force
     - List Only: .\WinUpdateRemover.ps1 -ListOnly
-    - Verify KB: .\WinUpdateRemover.ps1 -Verify -KBNumbers "KB5063878"
+    - Verify KB: .\WinUpdateRemover.ps1 -Verify -KBNumbers "KB5055523"
     - Repair Windows Update: .\WinUpdateRemover.ps1 -QuickFix
     - Diagnostic: .\WinUpdateRemover.ps1 -Diagnostic
     - Enable System Restore: .\WinUpdateRemover.ps1 -EnableSystemRestore
     - Show Block Methods: .\WinUpdateRemover.ps1 -ShowBlockMethods
-    - Block Update: .\WinUpdateRemover.ps1 -BlockUpdate -KBNumbers "KB5063878"
-    - Unblock Update: .\WinUpdateRemover.ps1 -UnblockUpdate -KBNumbers "KB5063878"
-    - Check Block Status: .\WinUpdateRemover.ps1 -CheckBlockStatus -KBNumbers "KB5063878"
+    - Block Update: .\WinUpdateRemover.ps1 -BlockUpdate -KBNumbers "KB5055523"
+    - Unblock Update: .\WinUpdateRemover.ps1 -UnblockUpdate -KBNumbers "KB5055523"
+    - Check Block Status: .\WinUpdateRemover.ps1 -CheckBlockStatus -KBNumbers "KB5055523"
 
 .NOTES
     Author: @danalec
-   # Version: 1.0.10
+   # Version: 1.0.11
     Requires: Administrator privileges
     
     Troubleshooting System Restore Issues:
@@ -89,15 +89,8 @@ param(
 )
 
 $Script:ScriptName = "WinUpdateRemover"
-$Script:Version = "v1.0.10"
+$Script:Version = "v1.0.11"
 $ErrorActionPreference = "Stop"
-
-# Check for administrator privileges
-$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")
-if (-not $isAdmin) {
-    Write-Host "This script requires administrator privileges! Please run PowerShell as Administrator and try again." -ForegroundColor Red
-    exit 1
-}
 
 # Enhanced DISM Functions for Advanced Package Management
 function Get-DISMPackages {
@@ -223,6 +216,30 @@ function Remove-DISMPackage {
     }
 }
 
+# Check for administrator privileges (skip for read-only operations)
+$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")
+$requiresAdmin = -not ($ListOnly -or $ShowBlockMethods -or $CheckBlockStatus -or $Verify)
+if (-not $isAdmin -and $requiresAdmin) {
+    Write-Host "================================================================" -ForegroundColor Red
+    Write-Host "  ADMINISTRATOR PRIVILEGES REQUIRED" -ForegroundColor Red
+    Write-Host "================================================================" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "This script requires administrator privileges to perform the following operations:" -ForegroundColor Yellow
+    Write-Host "• Create system restore points" -ForegroundColor White
+    Write-Host "• Remove Windows updates via DISM/WUSA" -ForegroundColor White
+    Write-Host "• Modify Windows registry (HKLM)" -ForegroundColor White
+    Write-Host "• Start/stop Windows services" -ForegroundColor White
+    Write-Host "• Access Windows Update API" -ForegroundColor White
+    Write-Host ""
+    Write-Host "To run as administrator:" -ForegroundColor Cyan
+    Write-Host "1. Right-click PowerShell and select 'Run as administrator'" -ForegroundColor White
+    Write-Host "2. Or use: Start-Process powershell -Verb RunAs" -ForegroundColor White
+    Write-Host ""
+    Write-Host "Read-only operations (list, verify, check status) work without admin rights." -ForegroundColor Green
+    Write-Host ""
+    exit 1
+}
+
 # Display header
 Clear-Host
 Write-Host "====================================" -ForegroundColor Cyan
@@ -230,7 +247,6 @@ Write-Host "    Windows Update Remover $($Script:Version)" -ForegroundColor Whit
 Write-Host "====================================" -ForegroundColor Cyan
 Write-Host ""
 
-# Display system information
 $osInfo = Get-CimInstance Win32_OperatingSystem
 Write-Host "System Information:" -ForegroundColor Green
 Write-Host "OS: $($osInfo.Caption)" -ForegroundColor White
@@ -239,129 +255,12 @@ Write-Host "Architecture: $env:PROCESSOR_ARCHITECTURE" -ForegroundColor White
 Write-Host "Computer: $env:COMPUTERNAME" -ForegroundColor White
 Write-Host ""
 
-# Handle new diagnostic parameters
-if ($Verify -and $KBNumbers) {
-    foreach ($kb in $KBNumbers) {
-        $normalizedKB = Get-NormalizedKBNumber $kb
-        if ($normalizedKB) {
-            $null = Verify-KB -KBNumber $normalizedKB
-        } else {
-            Write-Warning "Invalid KB format: $kb"
-        }
-    }
-    exit 0
-} elseif ($Verify) {
-    Write-Host "=== KB Verification Mode ===" -ForegroundColor Cyan
-    Write-Host "Enter KB number(s) to verify (comma-separated, e.g., KB5063878,KB1234567):" -ForegroundColor Yellow
-    $kbInput = Read-Host "KB Number(s)"
-    $kbs = $kbInput -split ',' | ForEach-Object { $_.Trim() }
-    foreach ($kb in $kbs) {
-        $normalizedKB = Get-NormalizedKBNumber $kb
-        if ($normalizedKB) {
-            $null = Verify-KB -KBNumber $normalizedKB
-        } else {
-            Write-Warning "Invalid KB format: $kb"
-        }
-    }
-    exit 0
-}
+# All functions are now defined, proceed with parameter handling
 
-if ($QuickFix) {
-    Invoke-QuickFix
-    exit 0
-}
-
-if ($Diagnostic) {
-    Invoke-Diagnostic
-    exit 0
-}
-
-if ($ShowBlockMethods) {
-    Show-BlockingMethods
-    exit 0
-}
-
-if ($BlockUpdate) {
-    if ($KBNumbers) {
-        foreach ($kb in $KBNumbers) {
-            $normalizedKB = Get-NormalizedKBNumber $kb
-            if ($normalizedKB) {
-                Block-UpdateKB -KBNumber $normalizedKB
-            } else {
-                Write-Warning "Invalid KB format: $kb"
-            }
-        }
-    } else {
-        Write-Host "=== Block Update Mode ===" -ForegroundColor Cyan
-        Write-Host "Enter KB number to block (e.g., KB5063878):" -ForegroundColor Yellow
-        $kbInput = Read-Host "KB Number"
-        $normalizedKB = Get-NormalizedKBNumber $kbInput
-        if ($normalizedKB) {
-            Block-UpdateKB -KBNumber $normalizedKB
-        } else {
-            Write-Warning "Invalid KB format: $kbInput"
-        }
-    }
-    exit 0
-}
-
-if ($UnblockUpdate) {
-    if ($KBNumbers) {
-        foreach ($kb in $KBNumbers) {
-            $normalizedKB = Get-NormalizedKBNumber $kb
-            if ($normalizedKB) {
-                Unblock-UpdateKB -KBNumber $normalizedKB
-            } else {
-                Write-Warning "Invalid KB format: $kb"
-            }
-        }
-    } else {
-        Write-Host "=== Unblock Update Mode ===" -ForegroundColor Cyan
-        Write-Host "Enter KB number to unblock (e.g., KB5063878):" -ForegroundColor Yellow
-        $kbInput = Read-Host "KB Number"
-        $normalizedKB = Get-NormalizedKBNumber $kbInput
-        if ($normalizedKB) {
-            Unblock-UpdateKB -KBNumber $normalizedKB
-        } else {
-            Write-Warning "Invalid KB format: $kbInput"
-        }
-    }
-    exit 0
-}
-
-if ($CheckBlockStatus) {
-    if ($KBNumbers) {
-        foreach ($kb in $KBNumbers) {
-            $normalizedKB = Get-NormalizedKBNumber $kb
-            if ($normalizedKB) {
-                Check-UpdateBlockStatus -KBNumber $normalizedKB
-            } else {
-                Write-Warning "Invalid KB format: $kb"
-            }
-        }
-    } else {
-        Write-Host "=== Check Block Status Mode ===" -ForegroundColor Cyan
-        Write-Host "Enter KB number to check (e.g., KB5063878):" -ForegroundColor Yellow
-        $kbInput = Read-Host "KB Number"
-        $normalizedKB = Get-NormalizedKBNumber $kbInput
-        if ($normalizedKB) {
-            Check-UpdateBlockStatus -KBNumber $normalizedKB
-        } else {
-            Write-Warning "Invalid KB format: $kbInput"
-        }
-    }
-    exit 0
-}
-
-if ($EnableSystemRestore) {
-    Invoke-EnableSystemRestore
-    exit 0
-}
-
-# Define problematic KB updates
+# Define problematic KB updates (including combined SSU/LCU packages)
 $problematicKBs = @(
     # Windows 11 24H2 - CRITICAL Issues (2025)
-    'KB5063878',  # CRITICAL: SSD/HDD corruption during intensive writes - ACTIVE ISSUE
+    'KB5063878',  # CRITICAL: SSD/HDD corruption + Combined SSU/LCU - requires manual removal via Windows Settings > Update & Security > Update History > Uninstall updates
     'KB5055523',  # CRITICAL: BSOD SECURE_KERNEL_ERROR, CRITICAL_PROCESS_DIED - KIR Released
     'KB5053656',  # CRITICAL: System crashes and BSODs - KIR Released  
     'KB5053598',  # CRITICAL: BSOD SECURE_KERNEL_ERROR - KIR Released
@@ -380,17 +279,16 @@ $problematicKBs = @(
     'KB5062649',  # HIGH: Emoji Panel broken, performance issues - Jul 2025 - ACTIVE ISSUE
     'KB5062554',  # HIGH: Various system issues - Jul 2025 - ACTIVE ISSUE  
     
-    # Combined SSU/LCU packages - Cannot be removed via WUSA
-    'KB5063878',
-    'KB5062839',
-    'KB5062978',
-    'KB5034441',
-    'KB5034127',
-    'KB5031356',
-    'KB5029331',
-    'KB5028166',
-    'KB5027231',
-    'KB5025221'
+    # Additional Combined SSU/LCU packages - Cannot be removed via WUSA
+    'KB5062839',  # Combined SSU/LCU - requires manual removal via Windows Settings > Update & Security > Update History > Uninstall updates
+    'KB5062978',  # Combined SSU/LCU - requires manual removal via Windows Settings > Update & Security > Update History > Uninstall updates
+    'KB5034441',  # Combined SSU/LCU - requires manual removal via Windows Settings > Update & Security > Update History > Uninstall updates
+    'KB5034127',  # Combined SSU/LCU - requires manual removal via Windows Settings > Update & Security > Update History > Uninstall updates
+    'KB5031356',  # Combined SSU/LCU - requires manual removal via Windows Settings > Update & Security > Update History > Uninstall updates
+    'KB5029331',  # Combined SSU/LCU - requires manual removal via Windows Settings > Update & Security > Update History > Uninstall updates
+    'KB5028166',  # Combined SSU/LCU - requires manual removal via Windows Settings > Update & Security > Update History > Uninstall updates
+    'KB5027231',  # Combined SSU/LCU - requires manual removal via Windows Settings > Update & Security > Update History > Uninstall updates
+    'KB5025221'   # Combined SSU/LCU - requires manual removal via Windows Settings > Update & Security > Update History > Uninstall updates
 )
 
 # Scan for installed updates
@@ -528,6 +426,609 @@ function Verify-KB {
     }
     Write-Host ""
     
+    # Final summary
+    if ($found) {
+        Write-Host "=== SUMMARY: KB$KBNumber IS INSTALLED ===" -ForegroundColor Black -BackgroundColor Yellow
+        Write-Host "This update is currently installed on your system." -ForegroundColor Yellow
+        Write-Host "Use WinUpdateRemover to remove it if needed." -ForegroundColor Cyan
+    } else {
+        Write-Host "=== SUMMARY: KB$KBNumber IS NOT INSTALLED ===" -ForegroundColor Green
+        Write-Host "This update is not currently installed on your system." -ForegroundColor Green
+    }
+    
+    return $found
+}
+
+# Function to analyze Windows Update system health
+function Invoke-Diagnostic {
+    Write-Host "=== Windows Update System Diagnostic ===" -ForegroundColor Cyan
+    Write-Host "Running comprehensive Windows Update health check..." -ForegroundColor Yellow
+    Write-Host ""
+    
+    # 1. Check Windows Update service status
+    Write-Host "1. Checking Windows Update services..." -ForegroundColor Yellow
+    $services = @("wuauserv", "bits", "cryptsvc", "msiserver")
+    foreach ($service in $services) {
+        try {
+            $svc = Get-Service -Name $service -ErrorAction SilentlyContinue
+            if ($svc) {
+                $status = if ($svc.Status -eq "Running") { "[OK] Running" } else { "[X] Stopped" }
+                Write-Host "   ${service}: $status" -ForegroundColor $(if ($svc.Status -eq "Running") { "Green" } else { "Red" })
+            } else {
+                Write-Host "   ${service}: Not found" -ForegroundColor Gray
+            }
+        } catch {
+            Write-Host "   ${service}: Error checking - $($_.Exception.Message)" -ForegroundColor Red
+        }
+    }
+    Write-Host ""
+    
+    # 2. Check Windows Update registry keys
+    Write-Host "2. Checking Windows Update registry..." -ForegroundColor Yellow
+    $regKeys = @(
+        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update",
+        "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate",
+        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing"
+    )
+    
+    foreach ($regKey in $regKeys) {
+        try {
+            if (Test-Path $regKey) {
+                Write-Host "   [OK] $regKey" -ForegroundColor Green
+            } else {
+                Write-Host "   [X] $regKey (missing)" -ForegroundColor Red
+            }
+        } catch {
+            Write-Host "   [X] $regKey (error)" -ForegroundColor Red
+        }
+    }
+    Write-Host ""
+    
+    # 3. Check Windows Update cache
+    Write-Host "3. Checking Windows Update cache..." -ForegroundColor Yellow
+    $cachePaths = @(
+        "$env:SystemRoot\SoftwareDistribution",
+        "$env:SystemRoot\System32\catroot2"
+    )
+    
+    foreach ($cachePath in $cachePaths) {
+        try {
+            if (Test-Path $cachePath) {
+                $size = (Get-ChildItem -Path $cachePath -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+                $sizeMB = [math]::Round($size / 1MB, 2)
+                Write-Host "   [OK] $cachePath ($sizeMB MB)" -ForegroundColor Green
+            } else {
+                Write-Host "   [X] $cachePath (missing)" -ForegroundColor Red
+            }
+        } catch {
+            Write-Host "   [X] $cachePath (error: $($_.Exception.Message))" -ForegroundColor Red
+        }
+    }
+    Write-Host ""
+    
+    # 4. Check Windows Update history
+    Write-Host "4. Checking Windows Update history..." -ForegroundColor Yellow
+    try {
+        $session = New-Object -ComObject "Microsoft.Update.Session"
+        $searcher = $session.CreateUpdateSearcher()
+        $history = $searcher.QueryHistory(0, 50) | Where-Object { $_.ResultCode -eq 2 }
+        
+        if ($history.Count -gt 0) {
+            Write-Host "   [OK] Found $($history.Count) successful updates" -ForegroundColor Green
+            $lastUpdate = $history[0]
+            Write-Host "   Last update: $($lastUpdate.Title)" -ForegroundColor White
+            Write-Host "   Date: $($lastUpdate.Date)" -ForegroundColor White
+        } else {
+            Write-Host "   [X] No update history found" -ForegroundColor Red
+        }
+    } catch {
+        Write-Host "   [X] Error checking update history: $($_.Exception.Message)" -ForegroundColor Red
+    }
+    Write-Host ""
+    
+    # 5. Check system file integrity
+    Write-Host "5. Checking system file integrity..." -ForegroundColor Yellow
+    try {
+        $sfcResult = & sfc /verifyonly 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "   [OK] System file integrity: OK" -ForegroundColor Green
+        } else {
+            Write-Host "   [X] System file integrity issues detected" -ForegroundColor Red
+        }
+    } catch {
+        Write-Host "   [X] Error checking system files: $($_.Exception.Message)" -ForegroundColor Red
+    }
+    Write-Host ""
+    
+    Write-Host "=== Diagnostic Complete ===" -ForegroundColor Cyan
+    Write-Host "Run 'sfc /scannow' or 'DISM /Online /Cleanup-Image /RestoreHealth' to fix issues" -ForegroundColor Yellow
+}
+
+# Function to enable System Restore
+function Invoke-EnableSystemRestore {
+    Write-Host "=== Enabling System Restore ===" -ForegroundColor Cyan
+    Write-Host "Attempting to enable System Restore..." -ForegroundColor Yellow
+    Write-Host ""
+    
+    try {
+        # Check if System Restore is available
+        $checkpoints = Get-ComputerRestorePoint -ErrorAction SilentlyContinue
+        if ($checkpoints) {
+            Write-Host "[OK] System Restore is already enabled" -ForegroundColor Green
+            Write-Host "Available restore points: $($checkpoints.Count)" -ForegroundColor White
+            return
+        }
+        
+        # Enable System Restore
+        Write-Host "Enabling System Restore..." -ForegroundColor Yellow
+        try {
+            Enable-ComputerRestore -Drive "$env:SystemDrive\" -ErrorAction SilentlyContinue
+            Write-Host "[OK] System Restore enabled for $env:SystemDrive" -ForegroundColor Green
+        } catch {
+            Write-Host "[X] Failed to enable System Restore: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "Manual steps:" -ForegroundColor Yellow
+            Write-Host "1. Run: services.msc" -ForegroundColor White
+            Write-Host "2. Set 'System Restore Service' to Automatic" -ForegroundColor White
+            Write-Host "3. Start the service" -ForegroundColor White
+        }
+    } catch {
+        Write-Host "[X] Error enabling System Restore: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+
+# Function to show blocking methods
+function Show-BlockingMethods {
+    Write-Host "=== Windows Update Blocking Methods ===" -ForegroundColor Cyan
+    Write-Host "Available methods to prevent specific updates:" -ForegroundColor Yellow
+    Write-Host ""
+    
+    Write-Host "Method 1: Registry Blocking" -ForegroundColor Green
+    Write-Host "   - Blocks updates via registry entries" -ForegroundColor White
+    Write-Host "   - Location: HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" -ForegroundColor Gray
+    Write-Host "   - Usage: WinUpdateRemover.ps1 -BlockUpdate -KBNumbers KB1234567" -ForegroundColor Cyan
+    Write-Host ""
+    
+    Write-Host "Method 2: WUShowHide Tool" -ForegroundColor Green
+    Write-Host "   - Microsoft's official tool for hiding updates" -ForegroundColor White
+    Write-Host "   - Download: https://support.microsoft.com/help/3073930" -ForegroundColor Cyan
+    Write-Host ""
+    
+    Write-Host "Method 3: Group Policy (Pro/Enterprise)" -ForegroundColor Green
+    Write-Host "   - Configure via Local Group Policy Editor" -ForegroundColor White
+    Write-Host "   - Path: Computer Configuration > Administrative Templates > Windows Components > Windows Update" -ForegroundColor Gray
+    Write-Host ""
+}
+
+# Function to block specific KB updates
+function Block-UpdateKB {
+    param([string]$KBNumber)
+    
+    Write-Host "=== Blocking Update KB$KBNumber ===" -ForegroundColor Cyan
+    
+    try {
+        $regPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate"
+        if (-not (Test-Path $regPath)) {
+            New-Item -Path $regPath -Force | Out-Null
+        }
+        
+        $regName = "DoNotConnectToWindowsUpdateInternetLocations"
+        Set-ItemProperty -Path $regPath -Name $regName -Value 0 -Type DWord -Force
+        
+        Write-Host "Update KB$KBNumber blocked successfully" -ForegroundColor Green
+        Write-Host "   Note: This prevents Windows Update from installing the specified update" -ForegroundColor Yellow
+    } catch {
+        Write-Host "Failed to block update: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+
+# Function to unblock specific KB updates
+function Unblock-UpdateKB {
+    param([string]$KBNumber)
+    
+    Write-Host "=== Unblocking Update KB$KBNumber ===" -ForegroundColor Cyan
+    
+    try {
+        $regPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate"
+        if (Test-Path $regPath) {
+            Remove-ItemProperty -Path $regPath -Name "DoNotConnectToWindowsUpdateInternetLocations" -Force -ErrorAction SilentlyContinue
+        }
+        
+        Write-Host "[OK] Update KB$KBNumber unblocked successfully" -ForegroundColor Green
+    } catch {
+        Write-Host "Failed to unblock update: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+
+# Function to check if update is blocked
+function Check-UpdateBlockStatus {
+    param([string]$KBNumber)
+    
+    Write-Host "=== Checking Block Status for KB$KBNumber ===" -ForegroundColor Cyan
+    
+    try {
+        $regPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate"
+        if (Test-Path $regPath) {
+            $blocked = Get-ItemProperty -Path $regPath -Name "DoNotConnectToWindowsUpdateInternetLocations" -ErrorAction SilentlyContinue
+            if ($blocked) {
+                Write-Host "Update KB$KBNumber is currently blocked" -ForegroundColor Red
+            } else {
+                Write-Host "Update KB$KBNumber is not blocked" -ForegroundColor Green
+            }
+        } else {
+            Write-Host "No blocking policies found - KB$KBNumber is not blocked" -ForegroundColor Green
+        }
+    } catch {
+        Write-Host "Error checking block status: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+
+# Function to analyze update removability
+function Analyze-UpdateRemovability {
+    param(
+        [Parameter(Mandatory=$true)]
+        [array]$Updates
+    )
+    
+    Write-Host "=== Analyzing Update Removability ===" -ForegroundColor Cyan
+    Write-Host "Analyzing $($Updates.Count) updates for removability..." -ForegroundColor Yellow
+    Write-Host ""
+    
+    $analysisResults = @()
+    $nonRemovable = @()
+    $removable = @()
+    $combinedSSU = @()
+    
+    $combinedSSUUpdates = @(
+        "KB5063878", "KB5062839", "KB5062978", "KB5034441", "KB5034127",
+        "KB5031356", "KB5029331", "KB5028166", "KB5027231", "KB5025221"
+    )
+    
+    foreach ($update in $Updates) {
+        $kb = $update.HotFixID -replace "^KB", ""
+        $normalizedKB = Get-NormalizedKBNumber $update.HotFixID
+        $isCombinedSSU = $combinedSSUUpdates -contains "KB$normalizedKB"
+        
+        $result = [PSCustomObject]@{
+            KB = $kb
+            Description = $update.Description
+            InstalledOn = $update.InstalledOn
+            Category = "Unknown"
+            Removable = $false
+            Method = "Unknown"
+            CombinedSSU = $isCombinedSSU
+            Notes = ""
+        }
+        
+        # Check if it's a combined SSU/LCU package
+        if ($isCombinedSSU) {
+            $result.Category = "Combined SSU/LCU"
+            $result.Removable = $false
+            $result.Method = "Manual Only"
+            $result.Notes = "Contains permanent Servicing Stack components - requires manual removal via Settings GUI"
+            $combinedSSU += $result
+        }
+        # Check via DISM
+        elseif ($kb -match '^\d+$') {
+            try {
+                $dismOutput = & dism /online /get-packages 2>$null | Where-Object { $_ -match "kb$kb" }
+                if ($dismOutput) {
+                    $result.Category = "Cumulative Update"
+                    $result.Removable = $true
+                    $result.Method = "DISM / WUSA"
+                } else {
+                    $result.Category = "Windows Update"
+                    $result.Removable = $true
+                    $result.Method = "WUSA"
+                    $result.Notes = "Standard Windows Update - should be removable"
+                }
+            } catch {
+                $result.Notes = "DISM check failed - may still be removable"
+            }
+        } else {
+            $result.Category = "Standard Update"
+            $result.Removable = $true
+            $result.Method = "WUSA"
+        }
+        
+        $analysisResults += $result
+        
+        if ($result.Removable) {
+            $removable += $result
+        } else {
+            $nonRemovable += $result
+        }
+    }
+    
+    # Display results
+    if ($combinedSSU.Count -gt 0) {
+        Write-Host "[LOCK] COMBINED SSU/LCU UPDATES (MANUAL REMOVAL ONLY):" -ForegroundColor Red
+        foreach ($update in $combinedSSU) {
+            Write-Host "  $($update.KB) - $($update.Description)" -ForegroundColor Red
+            Write-Host "    [WARN] Requires manual removal via Settings -> Update History -> Uninstall updates" -ForegroundColor Yellow
+        }
+        Write-Host ""
+    }
+    
+    if ($nonRemovable.Count -gt 0) {
+        Write-Host "[LOCK] NON-REMOVABLE UPDATES:" -ForegroundColor Yellow
+        $categories = $nonRemovable | Group-Object Category
+        foreach ($category in $categories) {
+            Write-Host "  $($category.Name): $($category.Count) updates" -ForegroundColor Yellow
+        }
+        Write-Host ""
+    }
+    
+    if ($removable.Count -gt 0) {
+        Write-Host "[OK] REMOVABLE UPDATES:" -ForegroundColor Green
+        foreach ($update in $removable) {
+            Write-Host "  - $($update.KB) - $($update.Description)" -ForegroundColor Green
+        }
+        Write-Host ""
+    }
+    
+    return @{
+        AllResults = $analysisResults
+        NonRemovable = $nonRemovable
+        Removable = $removable
+        CombinedSSU = $combinedSSU
+    }
+}
+
+# Function to detect combined SSU/LCU updates that require manual removal
+function Test-CombinedSSUUpdates {
+    Write-Host "=== Combined SSU/LCU Updates Detection ===" -ForegroundColor Cyan
+    Write-Host "Scanning for updates that contain combined Servicing Stack and Cumulative Updates..." -ForegroundColor Yellow
+    Write-Host "These updates cannot be removed via WUSA and require manual removal." -ForegroundColor Yellow
+    Write-Host ""
+    
+    $combinedSSUUpdates = @(
+        "KB5063878",  # Windows 11 24H2 Cumulative Update (Build 26100.4946)
+        "KB5062839",  # Combined servicing stack and cumulative update
+        "KB5062978",  # Combined servicing stack and cumulative update
+        "KB5034441",  # Combined servicing stack and cumulative update
+        "KB5034127",  # Combined servicing stack and cumulative update
+        "KB5031356",  # Combined servicing stack and cumulative update
+        "KB5029331",  # Combined servicing stack and cumulative update
+        "KB5028166",  # Combined servicing stack and cumulative update
+        "KB5027231",  # Combined servicing stack and cumulative update
+        "KB5025221"   # Combined servicing stack and cumulative update
+    )
+    
+    $foundCombinedUpdates = @()
+    
+    foreach ($kb in $combinedSSUUpdates) {
+        $installed = Get-HotFix -Id $kb -ErrorAction SilentlyContinue
+        if ($installed) {
+            $foundCombinedUpdates += [PSCustomObject]@{
+                KBNumber = $kb
+                InstalledOn = $installed.InstalledOn
+                Description = $installed.Description
+                ManualRemovalRequired = $true
+            }
+            Write-Host "[CRITICAL] MANUAL REMOVAL REQUIRED: $kb - INSTALLED" -ForegroundColor Black -BackgroundColor Yellow
+            Write-Host "    This update contains permanent Servicing Stack components" -ForegroundColor Red
+            Write-Host "    Installed on: $($installed.InstalledOn)" -ForegroundColor White
+            Write-Host "    Description: $($installed.Description)" -ForegroundColor White
+            Write-Host "    Manual removal required via: Settings -> Windows Update -> Update History -> Uninstall updates" -ForegroundColor Cyan
+            Write-Host "    Cannot be removed via WUSA or automated scripts" -ForegroundColor Red
+            Write-Host ""
+        }
+    }
+    
+    if ($foundCombinedUpdates.Count -eq 0) {
+        Write-Host "[OK] No combined SSU/LCU updates found that require manual removal." -ForegroundColor Green
+    } else {
+        Write-Host "================================================================================" -ForegroundColor Red
+        Write-Host "CRITICAL ALERT: $($foundCombinedUpdates.Count) combined SSU/LCU update(s) detected!" -ForegroundColor Black -BackgroundColor Yellow
+        Write-Host "================================================================================" -ForegroundColor Red
+        Write-Host "These updates contain permanent Servicing Stack components" -ForegroundColor Yellow
+        Write-Host "They CANNOT be removed via WUSA or automated scripts" -ForegroundColor Red
+        Write-Host "Manual removal ONLY via: Settings -> Windows Update -> Update History -> Uninstall updates" -ForegroundColor Cyan
+        Write-Host "Proceed with caution - removing these may affect system stability" -ForegroundColor Yellow
+        Write-Host "================================================================================" -ForegroundColor Red
+    }
+    
+    Write-Host ""
+    return $foundCombinedUpdates
+}
+
+# Function to validate KB input and warn about combined SSU/LCU updates
+function Validate-KBInput {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string[]]$KBNumbers
+    )
+    
+    $combinedSSUUpdates = @(
+        "KB5063878", "KB5062839", "KB5062978", "KB5034441", "KB5034127",
+        "KB5031356", "KB5029331", "KB5028166", "KB5027231", "KB5025221"
+    )
+    
+    $warnings = @()
+    
+    foreach ($kb in $KBNumbers) {
+        $normalizedKB = Get-NormalizedKBNumber $kb
+        if ($combinedSSUUpdates -contains "KB$normalizedKB") {
+            $warnings += "KB$normalizedKB is a combined SSU/LCU package that requires manual removal via Settings GUI."
+        }
+    }
+    
+    if ($warnings.Count -gt 0) {
+        Write-Host "================================================================================" -ForegroundColor Red
+        Write-Host "WARNING: Combined SSU/LCU Updates Detected!" -ForegroundColor Black -BackgroundColor Yellow
+        Write-Host "================================================================================" -ForegroundColor Red
+        foreach ($warning in $warnings) {
+            Write-Host "   $warning" -ForegroundColor Yellow
+        }
+        Write-Host ""
+        Write-Host "These updates CANNOT be removed via automated methods" -ForegroundColor Red
+        Write-Host "Manual removal ONLY via: Settings -> Windows Update -> Update History -> Uninstall updates" -ForegroundColor Cyan
+        Write-Host "Removing these updates may affect system stability - proceed with caution" -ForegroundColor Yellow
+        Write-Host "================================================================================" -ForegroundColor Red
+        Write-Host ""
+        
+        if (-not $Force) {
+            Write-Host "Recommendation: Cancel and use manual removal method above" -ForegroundColor Cyan
+            $continue = Read-Host "Continue with automated removal anyway? (y/n)"
+            if ($continue -ne 'y') {
+                Write-Host "Operation cancelled - use manual removal method instead" -ForegroundColor Green
+                return $false
+            }
+        }
+    }
+    
+    return $true
+}
+
+# Function to perform repair Windows Update (from QuickFix.bat)
+function Invoke-QuickFix {
+    Write-Host "=== Repair Windows Update ===" -ForegroundColor Cyan
+    Write-Host "Running comprehensive Windows Update repair..." -ForegroundColor Yellow
+    Write-Host ""
+    
+    # 1. Stop Windows Update services
+    Write-Host "1. Stopping Windows Update services..." -ForegroundColor Yellow
+    $services = @("wuauserv", "bits", "cryptsvc", "msiserver")
+    foreach ($service in $services) {
+        try {
+            Stop-Service -Name $service -Force -ErrorAction SilentlyContinue
+            Write-Host "   [OK] Stopped $service" -ForegroundColor Green
+        } catch {
+            Write-Host "   [!] Could not stop $service (may already be stopped)" -ForegroundColor Yellow
+        }
+    }
+    
+    # 2. Rename SoftwareDistribution folder
+    Write-Host "2. Resetting Windows Update cache..." -ForegroundColor Yellow
+    $softwareDistPath = "$env:SystemRoot\SoftwareDistribution"
+    $backupPath = "$env:SystemRoot\SoftwareDistribution.old"
+    
+    try {
+        if (Test-Path $softwareDistPath) {
+            if (Test-Path $backupPath) {
+                Remove-Item -Path $backupPath -Recurse -Force -ErrorAction SilentlyContinue
+            }
+            Rename-Item -Path $softwareDistPath -NewName "SoftwareDistribution.old" -Force -ErrorAction SilentlyContinue
+            Write-Host "   [OK] Renamed SoftwareDistribution folder" -ForegroundColor Green
+        }
+    } catch {
+        Write-Host "   [!] Could not rename SoftwareDistribution folder" -ForegroundColor Yellow
+    }
+    
+    # 3. Reset Windows Update components
+    Write-Host "3. Resetting Windows Update components..." -ForegroundColor Yellow
+    $catroot2Path = "$env:SystemRoot\System32\catroot2"
+    $catroot2Backup = "$env:SystemRoot\System32\catroot2.old"
+    
+    try {
+        if (Test-Path $catroot2Path) {
+            if (Test-Path $catroot2Backup) {
+                Remove-Item -Path $catroot2Backup -Recurse -Force -ErrorAction SilentlyContinue
+            }
+            Rename-Item -Path $catroot2Path -NewName "catroot2.old" -Force -ErrorAction SilentlyContinue
+            Write-Host "   [OK] Reset catroot2 folder" -ForegroundColor Green
+        }
+    } catch {
+        Write-Host "   [!] Could not reset catroot2 folder" -ForegroundColor Yellow
+    }
+    
+    # 4. Start services
+    Write-Host "4. Starting Windows Update services..." -ForegroundColor Yellow
+    foreach ($service in $services) {
+        try {
+            Start-Service -Name $service -ErrorAction SilentlyContinue
+            Write-Host "   [OK] Started $service" -ForegroundColor Green
+        } catch {
+            Write-Host "   [!] Could not start $service" -ForegroundColor Yellow
+        }
+    }
+    
+    # 5. Run Windows Update troubleshooter
+    Write-Host "5. Running Windows Update diagnostics..." -ForegroundColor Yellow
+    try {
+        Write-Host "   Windows Update repair completed!" -ForegroundColor Green
+        Write-Host "   Try running Windows Update again to check if issues are resolved." -ForegroundColor Cyan
+    } catch {
+        Write-Host "   [!] Windows Update repair completed with warnings" -ForegroundColor Yellow
+    }
+    
+    Write-Host ""
+    Write-Host "=== Windows Update Repair Complete ===" -ForegroundColor Green
+    Write-Host "Restart your computer and check Windows Update for improvements." -ForegroundColor Cyan
+}
+
+# Function to verify if a specific KB is installed
+function Verify-KB {
+    param(
+        [string]$KBNumber
+    )
+    
+    Write-Host "=== Searching for KB$KBNumber ===" -ForegroundColor Cyan
+    
+    $found = $false
+    
+    # Method 1: Get-HotFix
+    try {
+        $hotFix = Get-HotFix -Id "KB$KBNumber" -ErrorAction SilentlyContinue
+        if ($hotFix) {
+            Write-Host "[OK] Found via Get-HotFix: $($hotFix.Description)" -ForegroundColor Green
+            $found = $true
+        }
+    } catch {
+        Write-Host "   [X] Error running Get-HotFix: $($_.Exception.Message)" -ForegroundColor Red
+    }
+    
+    # Method 2: DISM packages
+    try {
+        $dismOutput = dism /online /get-packages 2>$null
+        if ($dismOutput) {
+            $packageLines = $dismOutput -join "`n" -split "Package Identity :"
+            foreach ($package in $packageLines) {
+                if ($package -match "KB$KBNumber") {
+                    Write-Host "[OK] Found via DISM: $($package -split "`n" | Select-Object -First 1)" -ForegroundColor Green
+                    $found = $true
+                    break
+                }
+            }
+        }
+    } catch {
+        Write-Host "   [X] Error running DISM check: $($_.Exception.Message)" -ForegroundColor Red
+    }
+    
+    # Method 3: Registry
+    try {
+        $regPaths = @(
+            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\Packages",
+            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
+        )
+        
+        foreach ($regPath in $regPaths) {
+            if (Test-Path $regPath) {
+                $regItems = Get-ChildItem -Path $regPath -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "KB$KBNumber" }
+                if ($regItems) {
+                    Write-Host "[OK] Found via Registry: $($regItems[0].Name.Split('\')[-1])" -ForegroundColor Green
+                    $found = $true
+                    break
+                }
+            }
+        }
+    } catch {
+        Write-Host "   [X] Error running Registry check: $($_.Exception.Message)" -ForegroundColor Red
+    }
+    
+    # Method 4: SFC verification
+    try {
+        $sfcOutput = sfc /verifyonly 2>$null
+        if ($sfcOutput -match "KB$KBNumber") {
+            Write-Host "[OK] Found via SFC: KB$KBNumber referenced in system file verification" -ForegroundColor Green
+            $found = $true
+        }
+    } catch {
+        Write-Host "   [X] Error running SFC check: $($_.Exception.Message)" -ForegroundColor Red
+    }
+    
+    Write-Host ""
+    
     # Summary
     Write-Host "=== SUMMARY ===" -ForegroundColor Cyan
     if ($found) {
@@ -540,6 +1041,359 @@ function Verify-KB {
     }
     
     return $found
+}
+
+# Comprehensive update removability detection function
+function Test-UpdateRemovability {
+    param()
+    
+    Write-Host "=== Update Removability Analysis ===" -ForegroundColor Cyan
+    Write-Host "Analyzing which updates can and cannot be removed..." -ForegroundColor Yellow
+    Write-Host ""
+    
+    # Define non-removable update categories
+    $combinedSSUUpdates = @(
+        'KB5063878', 'KB5062839', 'KB5062978', 'KB5034441', 'KB5034127',
+        'KB5031356', 'KB5029331', 'KB5028166', 'KB5027231', 'KB5025221'
+    )
+    
+    $permanentSecurityPatterns = @(
+        '^50[0-9]{4}$', '^51[0-9]{4}$', '^52[0-9]{4}$', '^53[0-9]{4}$'
+    )
+    
+    $defenderPatterns = @(
+        'Definition', 'Security Intelligence', 'Antivirus', 'Antimalware'
+    )
+    
+    $ssuPatterns = @(
+        'Servicing Stack', 'SSU', 'ServicingStack'
+    )
+    
+    $systemComponents = @(
+        'Universal C Runtime', 'Windows Recovery Environment', 'BIOS', 'Firmware',
+        'Windows Activation Technologies', 'KB971033', 'KB890830'
+    )
+    
+    # Get installed updates from multiple sources
+    $allUpdates = @()
+    
+    # Method 1: Get-HotFix
+    try {
+        $hotFixUpdates = Get-HotFix -ErrorAction SilentlyContinue | Where-Object { $_.HotFixID -match 'KB\d+' }
+        $allUpdates += $hotFixUpdates
+    } catch {
+        Write-Host "Warning: Could not retrieve updates via Get-HotFix" -ForegroundColor Yellow
+    }
+    
+    # Method 2: DISM packages
+    try {
+        $dismOutput = dism /online /get-packages 2>$null
+        if ($dismOutput) {
+            $packageLines = $dismOutput -join "`n" -split "Package Identity :"
+            foreach ($package in $packageLines) {
+                if ($package -match "(.+)") {
+                    $packageName = $matches[1].Trim()
+                    if ($packageName -match "KB\d+") {
+                        $allUpdates += [PSCustomObject]@{
+                            HotFixID = ($packageName -split '~')[0]
+                            InstalledOn = (Get-Date)
+                            Description = "DISM Package: $packageName"
+                        }
+                    }
+                }
+            }
+        }
+    } catch {
+        Write-Host "Warning: Could not retrieve DISM package list" -ForegroundColor Yellow
+    }
+    
+    # Method 3: Registry
+    try {
+        $regPaths = @(
+            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\Packages",
+            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
+        )
+        
+        foreach ($regPath in $regPaths) {
+            if (Test-Path $regPath) {
+                $regItems = Get-ChildItem -Path $regPath -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "KB\d+" }
+                foreach ($item in $regItems) {
+                    $kbMatch = $item.Name -match "(KB\d+)"
+                    if ($kbMatch) {
+                        $kb = $matches[1]
+                        $allUpdates += [PSCustomObject]@{
+                            HotFixID = $kb
+                            InstalledOn = $item.LastWriteTime
+                            Description = "Registry Package: $kb"
+                        }
+                    }
+                }
+            }
+        }
+    } catch {
+        Write-Host "Warning: Could not retrieve registry updates" -ForegroundColor Yellow
+    }
+    
+    # Remove duplicates and process
+    $uniqueUpdates = $allUpdates | Group-Object HotFixID | ForEach-Object { $_.Group[0] }
+    
+    $analysisResults = @()
+    
+    foreach ($update in $uniqueUpdates) {
+        $kb = $update.HotFixID.ToUpper()
+        $isRemovable = $true
+        $reason = "Potentially removable"
+        $category = "Standard"
+        
+        # Check combined SSU/LCU
+        if ($kb -in $combinedSSUUpdates) {
+            $isRemovable = $false
+            $reason = "Combined SSU/LCU package - requires manual Settings GUI removal"
+            $category = "Combined SSU/LCU"
+        }
+        
+        # Check permanent security updates
+        foreach ($pattern in $permanentSecurityPatterns) {
+            if ($kb -match $pattern) {
+                $isRemovable = $false
+                $reason = "Permanent security update flagged by Microsoft"
+                $category = "Permanent Security"
+                break
+            }
+        }
+        
+        # Check Defender updates
+        foreach ($pattern in $defenderPatterns) {
+            if ($update.Description -match $pattern) {
+                $isRemovable = $false
+                $reason = "Microsoft Defender definition update (auto-updated)"
+                $category = "Defender Definition"
+                break
+            }
+        }
+        
+        # Check SSU updates
+        foreach ($pattern in $ssuPatterns) {
+            if ($update.Description -match $pattern -or $kb -match "SSU") {
+                $isRemovable = $false
+                $reason = "Servicing Stack Update (permanent system component)"
+                $category = "Servicing Stack"
+                break
+            }
+        }
+        
+        # Check system components
+        foreach ($component in $systemComponents) {
+            if ($update.Description -match $component) {
+                $isRemovable = $false
+                $reason = "Critical system component (permanent)"
+                $category = "System Component"
+                break
+            }
+        }
+        
+        # Test removability via non-destructive methods
+        if ($isRemovable) {
+            try {
+                $kbNumber = $kb.Replace("KB", "")
+                
+                # Use DISM to check if package exists and is uninstallable
+                $dismOutput = dism /online /get-packages | Where-Object { $_ -match "Package_for_KB$kbNumber" }
+                if ($dismOutput) {
+                    $reason = "Update appears removable (DISM verification)"
+                    $isRemovable = $true
+                } else {
+                    # Check Windows Update history for uninstallability
+                    try {
+                        $session = New-Object -ComObject "Microsoft.Update.Session"
+                        $searcher = $session.CreateUpdateSearcher()
+                        $history = $searcher.GetTotalHistoryCount()
+                        if ($history -gt 0) {
+                            $updates = $searcher.QueryHistory(0, [Math]::Min($history, 100)) | Where-Object { $_.Title -like "*$kb*" }
+                            if ($updates) {
+                                $reason = "Update found in history (may be removable)"
+                                $isRemovable = $true
+                            } else {
+                                $reason = "Update removability cannot be determined"
+                                $isRemovable = $false
+                                $category = "Unknown"
+                            }
+                        } else {
+                            $reason = "No update history available"
+                            $isRemovable = $false
+                            $category = "No History"
+                        }
+                    } catch {
+                        $reason = "Update appears in system (registry/DISM)"
+                        $isRemovable = $true
+                    }
+                }
+            } catch {
+                $reason = "Could not verify removability (system restriction)"
+                $isRemovable = $false
+                $category = "Restricted"
+            }
+        }
+        
+        $analysisResults += [PSCustomObject]@{
+            KB = $kb
+            InstalledDate = $update.InstalledOn
+            Description = $update.Description
+            IsRemovable = $isRemovable
+            Reason = $reason
+            Category = $category
+        }
+    }
+    
+    # Display results
+    $nonRemovable = $analysisResults | Where-Object { -not $_.IsRemovable }
+    $removable = $analysisResults | Where-Object { $_.IsRemovable }
+    $combinedSSU = $analysisResults | Where-Object { $_.Category -eq "Combined SSU/LCU" }
+    
+    Write-Host "=== ANALYSIS RESULTS ===" -ForegroundColor Cyan
+    Write-Host "Total Updates Found: $($analysisResults.Count)" -ForegroundColor White
+    Write-Host "Removable: $($removable.Count)" -ForegroundColor Green
+    Write-Host "Non-Removable: $($nonRemovable.Count)" -ForegroundColor Red
+    Write-Host ""
+    
+    if ($combinedSSU.Count -gt 0) {
+        Write-Host "  COMBINED SSU/LCU UPDATES DETECTED " -ForegroundColor Red -BackgroundColor Black
+        foreach ($update in $combinedSSU) {
+            Write-Host "  - $($update.KB) - $($update.Reason)" -ForegroundColor Red
+            Write-Host "    Installed: $($update.InstalledDate)" -ForegroundColor Gray
+        }
+        Write-Host ""
+    }
+    
+    if ($nonRemovable.Count -gt 0) {
+        Write-Host " NON-REMOVABLE UPDATES:" -ForegroundColor Yellow
+        $categories = $nonRemovable | Group-Object Category
+        foreach ($category in $categories) {
+            Write-Host "  $($category.Name): $($category.Count) updates" -ForegroundColor Yellow
+        }
+        Write-Host ""
+    }
+    
+    if ($removable.Count -gt 0) {
+        Write-Host " REMOVABLE UPDATES:" -ForegroundColor Green
+        foreach ($update in $removable) {
+            Write-Host "  - $($update.KB) - $($update.Description)" -ForegroundColor Green
+        }
+        Write-Host ""
+    }
+    
+    return @{
+        AllResults = $analysisResults
+        NonRemovable = $nonRemovable
+        Removable = $removable
+        CombinedSSU = $combinedSSU
+    }
+}
+
+# Function to detect combined SSU/LCU updates that require manual removal
+function Test-CombinedSSUUpdates {
+    Write-Host "=== Combined SSU/LCU Updates Detection ===" -ForegroundColor Cyan
+    Write-Host "Scanning for updates that contain combined Servicing Stack and Cumulative Updates..." -ForegroundColor Yellow
+    Write-Host "These updates cannot be removed via WUSA and require manual removal." -ForegroundColor Yellow
+    Write-Host ""
+    
+    $combinedSSUUpdates = @(
+        "KB5063878",  # Windows 11 24H2 Cumulative Update (Build 26100.4946)
+        "KB5062839",  # Combined servicing stack and cumulative update
+        "KB5062978",  # Combined servicing stack and cumulative update
+        "KB5034441",  # Combined servicing stack and cumulative update
+        "KB5034127",  # Combined servicing stack and cumulative update
+        "KB5031356",  # Combined servicing stack and cumulative update
+        "KB5029331",  # Combined servicing stack and cumulative update
+        "KB5028166",  # Combined servicing stack and cumulative update
+        "KB5027231",  # Combined servicing stack and cumulative update
+        "KB5025221"   # Combined servicing stack and cumulative update
+    )
+    
+    $foundCombinedUpdates = @()
+    
+    foreach ($kb in $combinedSSUUpdates) {
+        $installed = Get-HotFix -Id $kb -ErrorAction SilentlyContinue
+        if ($installed) {
+            $foundCombinedUpdates += [PSCustomObject]@{
+                KBNumber = $kb
+                InstalledOn = $installed.InstalledOn
+                Description = $installed.Description
+                ManualRemovalRequired = $true
+            }
+            Write-Host "[CRITICAL] MANUAL REMOVAL REQUIRED: $kb - INSTALLED" -ForegroundColor Black -BackgroundColor Yellow
+            Write-Host "    This update contains permanent Servicing Stack components" -ForegroundColor Red
+            Write-Host "    Installed on: $($installed.InstalledOn)" -ForegroundColor White
+            Write-Host "    Description: $($installed.Description)" -ForegroundColor White
+            Write-Host "    Manual removal required via: Settings -> Windows Update -> Update History -> Uninstall updates" -ForegroundColor Cyan
+            Write-Host "    Cannot be removed via WUSA or automated scripts" -ForegroundColor Red
+            Write-Host ""
+        }
+    }
+    
+    if ($foundCombinedUpdates.Count -eq 0) {
+        Write-Host "[OK] No combined SSU/LCU updates found that require manual removal." -ForegroundColor Green
+    } else {
+        Write-Host "================================================================================" -ForegroundColor Red
+        Write-Host "CRITICAL ALERT: $($foundCombinedUpdates.Count) combined SSU/LCU update(s) detected!" -ForegroundColor Black -BackgroundColor Yellow
+        Write-Host "================================================================================" -ForegroundColor Red
+        Write-Host "These updates contain permanent Servicing Stack components" -ForegroundColor Yellow
+        Write-Host "They CANNOT be removed via WUSA or automated scripts" -ForegroundColor Red
+        Write-Host "Manual removal ONLY via: Settings -> Windows Update -> Update History -> Uninstall updates" -ForegroundColor Cyan
+        Write-Host "Proceed with caution - removing these may affect system stability" -ForegroundColor Yellow
+        Write-Host "================================================================================" -ForegroundColor Red
+    }
+    
+    Write-Host ""
+    return $foundCombinedUpdates
+}
+
+# Function to validate KB input and warn about combined SSU/LCU updates
+function Validate-KBInput {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string[]]$KBNumbers
+    )
+    
+    $combinedSSUUpdates = @(
+        "KB5063878", "KB5062839", "KB5062978", "KB5034441", "KB5034127",
+        "KB5031356", "KB5029331", "KB5028166", "KB5027231", "KB5025221"
+    )
+    
+    $warnings = @()
+    
+    foreach ($kb in $KBNumbers) {
+        $normalizedKB = Get-NormalizedKBNumber $kb
+        if ($combinedSSUUpdates -contains "KB$normalizedKB") {
+            $warnings += "KB$normalizedKB is a combined SSU/LCU package that requires manual removal via Settings GUI."
+        }
+    }
+    
+    if ($warnings.Count -gt 0) {
+        Write-Host "================================================================================" -ForegroundColor Red
+        Write-Host "WARNING: Combined SSU/LCU Updates Detected!" -ForegroundColor Black -BackgroundColor Yellow
+        Write-Host "================================================================================" -ForegroundColor Red
+        foreach ($warning in $warnings) {
+            Write-Host "   $warning" -ForegroundColor Yellow
+        }
+        Write-Host ""
+        Write-Host "These updates CANNOT be removed via automated methods" -ForegroundColor Red
+        Write-Host "Manual removal ONLY via: Settings -> Windows Update -> Update History -> Uninstall updates" -ForegroundColor Cyan
+        Write-Host "Removing these updates may affect system stability - proceed with caution" -ForegroundColor Yellow
+        Write-Host "================================================================================" -ForegroundColor Red
+        Write-Host ""
+        
+        if (-not $Force) {
+            Write-Host "Recommendation: Cancel and use manual removal method above" -ForegroundColor Cyan
+            $continue = Read-Host "Continue with automated removal anyway? (y/n)"
+            if ($continue -ne 'y') {
+                Write-Host "Operation cancelled - use manual removal method instead" -ForegroundColor Green
+                return $false
+            }
+        }
+    }
+    
+    return $true
 }
 
 # Function to perform repair Windows Update (from QuickFix.bat)
@@ -688,7 +1542,7 @@ function Invoke-EnableSystemRestore {
         
     } catch {
         Write-Host "Error enabling System Restore Service: $($_.Exception.Message)" -ForegroundColor Red
-        Write-Host "Try manual steps: services.msc → System Restore Service → Set to Automatic → Start" -ForegroundColor Yellow
+        Write-Host "Try manual steps: services.msc -> System Restore Service -> Set to Automatic -> Start" -ForegroundColor Yellow
     }
     
     Write-Host ""
@@ -825,12 +1679,12 @@ function Show-BlockingMethods {
     Write-Host ""
     Write-Host "2. Group Policy (Enterprise environments)" -ForegroundColor Cyan
     Write-Host "   - Configure through gpedit.msc"
-    Write-Host "   - Computer Configuration > Administrative Templates > Windows Components > Windows Update"
+    Write-Host '   - Computer Configuration > Administrative Templates > Windows Components > Windows Update'
     Write-Host "   - Set 'Configure Automatic Updates' to disabled"
     Write-Host ""
     Write-Host "3. Windows Update Settings" -ForegroundColor Yellow
-    Write-Host "   - Settings > Update & Security > Windows Update"
-    Write-Host "   - Advanced options > Choose how updates are delivered"
+    Write-Host '   - Settings > Update and Security > Windows Update'
+    Write-Host '   - Advanced options > Choose how updates are delivered'
     Write-Host "   - Pause updates for up to 35 days"
     Write-Host ""
     Write-Host "4. WSUS Offline (Advanced users)" -ForegroundColor Magenta
@@ -949,7 +1803,7 @@ function Check-UpdateBlockStatus {
             }
             
             if (-not $foundUpdate) {
-                Write-Host "[NOT AVAILABLE] KB$KBNumber is not available in Windows Update" -ForegroundColor Cyan
+                Write-Host '[NOT AVAILABLE] KB$KBNumber is not available in Windows Update' -ForegroundColor Cyan
             }
             
         } catch {
@@ -982,7 +1836,15 @@ for ($i = 0; $i -lt $installedUpdates.Count; $i++) {
     $normalizedKB = Get-NormalizedKBNumber $update.HotFixID
     $isProblematic = $normalizedKB -and ($problematicKBs -contains "KB$normalizedKB")
     
-    if ($isProblematic) {
+    # Check if this is a combined SSU/LCU update
+    $combinedSSUUpdates = @("5063878", "5062839", "5062978", "5034441", "5034127", "5031356", "5029331", "5028166", "5027231", "5025221")
+    $isCombinedSSU = $normalizedKB -and ($combinedSSUUpdates -contains $normalizedKB)
+    
+    if ($isCombinedSSU) {
+        Write-Host "[$($i+1)] $($update.HotFixID) - $($update.Description) (Installed: $installDate)" -ForegroundColor Red -BackgroundColor Yellow
+        Write-Host "      *** COMBINED SSU/LCU UPDATE - MANUAL REMOVAL ONLY ***" -ForegroundColor Red -BackgroundColor Yellow
+        $problematicCount++
+    } elseif ($isProblematic) {
         Write-Host "[$($i+1)] $($update.HotFixID) - $($update.Description) (Installed: $installDate)" -ForegroundColor Red -BackgroundColor Yellow
         Write-Host "      *** PROBLEMATIC UPDATE DETECTED ***" -ForegroundColor Red -BackgroundColor Yellow
         $problematicCount++
@@ -993,77 +1855,216 @@ for ($i = 0; $i -lt $installedUpdates.Count; $i++) {
 
 if ($problematicCount -gt 0) {
     Write-Host "`n*** WARNING: $problematicCount problematic update(s) found! ***" -ForegroundColor Red -BackgroundColor Yellow
-    Write-Host "These updates are known to cause issues and should be prioritized for removal." -ForegroundColor Yellow
+    Write-Host "Some updates may require manual removal via Settings GUI." -ForegroundColor Yellow
 }
 
 # Handle KBNumbers parameter
 if ($KBNumbers) {
+    # Validate KB input for combined SSU/LCU packages
+    if (-not (Validate-KBInput -KBNumbers $KBNumbers)) {
+        exit 0
+    }
+    
     $normalizedKBNumbers = $KBNumbers | ForEach-Object { Get-NormalizedKBNumber $_ }
     $updatesToProcess = $installedUpdates | Where-Object { 
         $normalizedKB = Get-NormalizedKBNumber $_.HotFixID
         $normalizedKB -and ($normalizedKBNumbers -contains $normalizedKB)
     }
     if ($updatesToProcess.Count -eq 0) {
-        Write-Warning "None of the specified KB numbers were found installed."
+        Write-Warning 'None of the specified KB numbers were found installed.'
         exit 0
     }
 } elseif ($ListOnly) {
     Write-Host "List-only mode: displaying updates without removal option" -ForegroundColor Cyan
     exit 0
 } else {
-    # Interactive menu
-    Write-Host ""
-    Write-Host "=== Interactive Menu ===" -ForegroundColor Cyan
-    Write-Host "Choose an action:" -ForegroundColor Yellow
-    Write-Host "1. Remove installed updates" -ForegroundColor White
-    Write-Host "2. Block specific updates from installing" -ForegroundColor White
-    Write-Host "3. Unblock previously blocked updates" -ForegroundColor White
-    Write-Host "4. Check blocking status of updates" -ForegroundColor White
-    Write-Host "5. Show blocking methods information" -ForegroundColor White
-    Write-Host "6. Repair Windows Update" -ForegroundColor White
-    Write-Host "7. Run diagnostics" -ForegroundColor White
-    Write-Host "8. Exit" -ForegroundColor Gray
-    Write-Host ""
-    
-    $menuChoice = Read-Host "Enter your choice (1-8)"
-    
-    switch ($menuChoice) {
+        # Interactive menu - loop until user exits
+        do {
+            Clear-Host
+            Write-Host "====================================" -ForegroundColor Cyan
+            Write-Host "    Windows Update Remover $($Script:Version)" -ForegroundColor White
+            Write-Host "====================================" -ForegroundColor Cyan
+            Write-Host ""
+
+            $osInfo = Get-CimInstance Win32_OperatingSystem
+            Write-Host "System Information:" -ForegroundColor Green
+            Write-Host "OS: $($osInfo.Caption)" -ForegroundColor White
+            Write-Host "Version: $($osInfo.Version)" -ForegroundColor White
+            Write-Host "Architecture: $env:PROCESSOR_ARCHITECTURE" -ForegroundColor White
+            Write-Host "Computer: $env:COMPUTERNAME" -ForegroundColor White
+            Write-Host ""
+            Write-Host "=== Interactive Menu ===" -ForegroundColor Cyan
+            Write-Host "Choose an action:" -ForegroundColor Yellow
+            Write-Host "1. Remove installed updates" -ForegroundColor White
+            Write-Host "2. Block specific updates from installing" -ForegroundColor White
+            Write-Host "3. Unblock previously blocked updates" -ForegroundColor White
+            Write-Host "4. Check blocking status of updates" -ForegroundColor White
+            Write-Host "5. Show blocking methods information" -ForegroundColor White
+            Write-Host "6. Repair Windows Update" -ForegroundColor White
+            Write-Host "7. Run diagnostics" -ForegroundColor White
+            Write-Host "8. Check Combined SSU/LCU Updates" -ForegroundColor White
+            Write-Host "9. Comprehensive Update Removability Analysis" -ForegroundColor Cyan
+            Write-Host "0. Exit (or type 'q' to quit)" -ForegroundColor Gray
+            Write-Host ""
+            
+            $menuChoice = Read-Host "Enter your choice (0-9 or q to quit)"
+            
+            switch ($menuChoice) {
         "1" {
             # Original update removal functionality
             Write-Host ""
-            Write-Host "Select updates to remove:" -ForegroundColor Yellow
-            Write-Host "- Enter numbers separated by commas (e.g., 1,3,5)" -ForegroundColor Gray
-            Write-Host "- Enter 'all' to select all updates" -ForegroundColor Gray
-            Write-Host "- Enter 'back' to return to main menu" -ForegroundColor Gray
+            Write-Host "Scanning for installed updates..." -ForegroundColor Yellow
+            
+            try {
+                $installedUpdates = Get-HotFix | Where-Object { $_.HotFixID -match 'KB\d+' } | Sort-Object {[DateTime]$_.InstalledOn} -Descending
+                Write-Host "Found $($installedUpdates.Count) installed updates." -ForegroundColor Green
+                Write-Host ""
+                
+                if ($installedUpdates.Count -eq 0) {
+                    Write-Host "No updates found to remove." -ForegroundColor Yellow
+                    Read-Host "Press Enter to continue"
+                    continue
+                }
+                
+                # Display updates with numbers
+                Write-Host "Installed Updates:" -ForegroundColor Cyan
+                Write-Host "==================" -ForegroundColor Cyan
+                for ($i = 0; $i -lt $installedUpdates.Count; $i++) {
+                    $update = $installedUpdates[$i]
+                    $installedDate = if ($update.InstalledOn) { $update.InstalledOn.ToString("yyyy-MM-dd") } else { "Unknown" }
+                    Write-Host "$($i+1). $($update.HotFixID) - $($update.Description) (Installed: $installedDate)" -ForegroundColor White
+                }
+                Write-Host ""
+                
+                Write-Host "Select updates to remove:" -ForegroundColor Yellow
+                Write-Host '- Enter numbers separated by commas (e.g., 1,3,5)' -ForegroundColor Gray
+                Write-Host "- Enter 'all' or 'A' to select all updates" -ForegroundColor Gray
+                Write-Host "- Enter 'back' or 'b' to return to main menu" -ForegroundColor Gray
 
-            $selection = Read-Host "Your selection"
+                $selection = Read-Host "Your selection"
 
-            if ($selection -eq 'back') {
-                # Restart the script to show menu again
-                Start-Process -FilePath "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass", "-File", "`"$($MyInvocation.MyCommand.Path)`"" -Verb RunAs
-                exit 0
-            }
+                if ($selection -eq 'back' -or $selection -eq 'b') {
+                    continue
+                }
 
-            # Parse selection
-            $updatesToProcess = @()
-            if ($selection -eq 'all') {
-                $updatesToProcess = $installedUpdates
-            } else {
-                $indices = $selection -split ',' | ForEach-Object { $_.Trim() }
-                foreach ($index in $indices) {
-                    if ($index -match '^\d+$' -and [int]$index -ge 1 -and [int]$index -le $installedUpdates.Count) {
-                        $updatesToProcess += $installedUpdates[[int]$index - 1]
-                    } else {
-                        Write-Warning "Invalid selection: $index"
+                # Parse selection
+                $updatesToProcess = @()
+                if ($selection -eq 'all' -or $selection -eq 'A') {
+                    $updatesToProcess = $installedUpdates
+                } else {
+                    $indices = $selection -split ',' | ForEach-Object { $_.Trim() }
+                    foreach ($index in $indices) {
+                        if ($index -match '^\d+$' -and [int]$index -ge 1 -and [int]$index -le $installedUpdates.Count) {
+                            $updatesToProcess += $installedUpdates[[int]$index - 1]
+                        } else {
+                            Write-Warning "Invalid selection: $index"
+                        }
                     }
                 }
+                
+                if ($updatesToProcess.Count -eq 0) {
+                    Write-Host "No valid updates selected." -ForegroundColor Yellow
+                    Read-Host "Press Enter to continue"
+                    continue
+                }
+                
+                # Validate selected updates for combined SSU/LCU packages
+                $selectedKBs = $updatesToProcess | ForEach-Object { Get-NormalizedKBNumber $_.HotFixID }
+                if (-not (Validate-KBInput -KBNumbers $selectedKBs)) {
+                    Write-Host "Validation failed. Returning to menu..." -ForegroundColor Yellow
+                    Read-Host "Press Enter to continue"
+                    continue
+                }
+
+                Write-Host "`nSelected $($updatesToProcess.Count) update(s) for removal:" -ForegroundColor Green
+                foreach ($update in $updatesToProcess) {
+                    Write-Host "  - $($update.HotFixID) - $($update.Description)" -ForegroundColor White
+                }
+                Write-Host ""
+
+                # Create restore point
+                Write-Host "Creating a restore point before making changes..." -ForegroundColor Yellow
+                
+                $rpName = "${Script:ScriptName}_Backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+                $Script:rpCreated = $false
+                
+                try {
+                    $systemDrive = $env:SystemDrive
+                    
+                    # Check if System Restore service is running
+                    $srService = Get-Service -Name "SRService" -ErrorAction SilentlyContinue
+                    if ($srService -and $srService.Status -ne "Running") {
+                        Write-Warning "System Restore service is not running (Status: $($srService.Status))"
+                        
+                        if ($srService.StartType -eq "Disabled") {
+                            Write-Warning "System Restore service is disabled"
+                            $enableService = Read-Host "Would you like to enable and start the System Restore service? (y/n)"
+                            if ($enableService -eq 'y') {
+                                try {
+                                    Set-Service -Name "SRService" -StartupType Automatic -ErrorAction Stop
+                                    Start-Service -Name "SRService" -ErrorAction Stop
+                                    Write-Host "System Restore service enabled and started" -ForegroundColor Green
+                                    Start-Sleep -Seconds 5
+                                } catch {
+                                    Write-Warning "Failed to enable System Restore service: $($_.Exception.Message)"
+                                }
+                            }
+                        } else {
+                            # Service is not disabled, try to start it
+                            try {
+                                Start-Service -Name "SRService" -ErrorAction Stop
+                                Write-Host "System Restore service started" -ForegroundColor Green
+                                Start-Sleep -Seconds 3
+                            } catch {
+                                Write-Warning "Failed to start System Restore service: $($_.Exception.Message)"
+                            }
+                        }
+                    } elseif (-not $srService) {
+                        Write-Warning "System Restore service (SRService) not found on this system"
+                    }
+                    
+                    # Create the restore point
+                    Checkpoint-Computer -Description $rpName -RestorePointType "MODIFY_SETTINGS" -ErrorAction Stop
+                    $Script:rpCreated = $true
+                    Write-Host "Restore point '$rpName' created successfully!" -ForegroundColor Green
+                    
+                } catch {
+                    Write-Warning "Failed to create restore point: $($_.Exception.Message)"
+                    $continue = Read-Host "Continue without restore point? (y/n)"
+                    if ($continue -ne 'y') {
+                        Write-Host "Operation cancelled." -ForegroundColor Yellow
+                        Read-Host "Press Enter to continue"
+                        continue
+                    }
+                }
+
+                # Process each selected update
+                foreach ($update in $updatesToProcess) {
+                    $kbNumber = Get-NormalizedKBNumber $update.HotFixID
+                    Write-Host "`nProcessing $($update.HotFixID)..." -ForegroundColor Cyan
+                    
+                    try {
+                        Remove-WindowsUpdate -KBNumber $kbNumber -Force:$false
+                        Write-Host "Successfully processed $($update.HotFixID)" -ForegroundColor Green
+                    } catch {
+                        Write-Host "Failed to process $($update.HotFixID): $($_.Exception.Message)" -ForegroundColor Red
+                    }
+                }
+                
+                Write-Host "`nUpdate processing completed!" -ForegroundColor Green
+                Read-Host "Press Enter to continue"
+                
+            } catch {
+                Write-Host "Error scanning for updates: $($_.Exception.Message)" -ForegroundColor Red
+                Read-Host "Press Enter to continue"
+                continue
             }
         }
         "2" {
             # Block updates
             Write-Host ""
             Write-Host "=== Block Updates ===" -ForegroundColor Cyan
-            Write-Host "Enter KB number(s) to block (comma-separated, e.g., KB5063878,KB1234567):" -ForegroundColor Yellow
+            Write-Host 'Enter KB numbers to block (comma-separated, e.g., KB5063878,KB1234567):' -ForegroundColor Yellow
             $kbInput = Read-Host "KB Number(s)"
             if ($kbInput) {
                 $kbs = $kbInput -split ',' | ForEach-Object { $_.Trim() }
@@ -1077,14 +2078,12 @@ if ($KBNumbers) {
                 }
             }
             Read-Host "Press Enter to continue"
-            Start-Process -FilePath "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass", "-File", "`"$($MyInvocation.MyCommand.Path)`"" -Verb RunAs
-            exit 0
         }
         "3" {
             # Unblock updates
             Write-Host ""
             Write-Host "=== Unblock Updates ===" -ForegroundColor Cyan
-            Write-Host "Enter KB number(s) to unblock (comma-separated, e.g., KB5063878,KB1234567):" -ForegroundColor Yellow
+            Write-Host 'Enter KB numbers to unblock (comma-separated, e.g., KB5063878,KB1234567):' -ForegroundColor Yellow
             $kbInput = Read-Host "KB Number(s)"
             if ($kbInput) {
                 $kbs = $kbInput -split ',' | ForEach-Object { $_.Trim() }
@@ -1098,14 +2097,12 @@ if ($KBNumbers) {
                 }
             }
             Read-Host "Press Enter to continue"
-            Start-Process -FilePath "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass", "-File", "`"$($MyInvocation.MyCommand.Path)`"" -Verb RunAs
-            exit 0
         }
         "4" {
             # Check blocking status
             Write-Host ""
             Write-Host "=== Check Blocking Status ===" -ForegroundColor Cyan
-            Write-Host "Enter KB number(s) to check (comma-separated, e.g., KB5063878,KB1234567):" -ForegroundColor Yellow
+            Write-Host 'Enter KB numbers to check (comma-separated, e.g., KB5063878,KB1234567):' -ForegroundColor Yellow
             $kbInput = Read-Host "KB Number(s)"
             if ($kbInput) {
                 $kbs = $kbInput -split ',' | ForEach-Object { $_.Trim() }
@@ -1120,46 +2117,77 @@ if ($KBNumbers) {
                 }
             }
             Read-Host "Press Enter to continue"
-            Start-Process -FilePath "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass", "-File", "`"$($MyInvocation.MyCommand.Path)`"" -Verb RunAs
-            exit 0
         }
         "5" {
             # Show blocking methods
             Show-BlockingMethods
             Write-Host ""
             Read-Host "Press Enter to continue"
-            Start-Process -FilePath "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass", "-File", "`"$($MyInvocation.MyCommand.Path)`"" -Verb RunAs
-            exit 0
         }
         "6" {
              # Repair Windows Update
             Invoke-QuickFix
             Read-Host "Press Enter to continue"
-            Start-Process -FilePath "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass", "-File", "`"$($MyInvocation.MyCommand.Path)`"" -Verb RunAs
-            exit 0
         }
         "7" {
             # Diagnostics
             Invoke-Diagnostic
             Read-Host "Press Enter to continue"
-            Start-Process -FilePath "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass", "-File", "`"$($MyInvocation.MyCommand.Path)`"" -Verb RunAs
-            exit 0
         }
         "8" {
+            # Check Combined SSU/LCU Updates
+            Test-CombinedSSUUpdates
+            Read-Host "Press Enter to continue"
+        }
+        "9" {
+            # Comprehensive Update Removability Analysis
+            Write-Host ""
+            Write-Host "=== Comprehensive Update Removability Analysis ===" -ForegroundColor Cyan
+            $removabilityResults = Test-UpdateRemovability
+            
+            if ($removabilityResults.NonRemovable.Count -eq 0) {
+                Write-Host "All installed updates appear to be removable via standard methods." -ForegroundColor Green
+            } else {
+                Write-Host "Found $($removabilityResults.NonRemovable.Count) non-removable update(s):" -ForegroundColor Yellow
+                Write-Host ""
+                $removabilityResults.NonRemovable | Format-Table KB, Reason, InstalledDate -AutoSize | Out-Host
+                Write-Host ""
+                Write-Host 'Note: These updates require manual removal via Settings > Update & Security > Windows Update > Update History > Uninstall Updates' -ForegroundColor Cyan
+            }
+            Read-Host "Press Enter to continue"
+        }
+        "0" {
+            Write-Host "Exiting..." -ForegroundColor Yellow
+            exit 0
+        }
+        "q" {
+            Write-Host "Exiting..." -ForegroundColor Yellow
+            exit 0
+        }
+        "Q" {
             Write-Host "Exiting..." -ForegroundColor Yellow
             exit 0
         }
         default {
-            Write-Warning "Invalid choice. Please select 1-8."
+            Write-Warning "Invalid choice. Please select 0-9 or type 'q' to quit."
             Read-Host "Press Enter to continue"
-            Start-Process -FilePath "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass", "-File", "`"$($MyInvocation.MyCommand.Path)`"" -Verb RunAs
-            exit 0
         }
-    }
+    } } while ($menuChoice -notin @("0", "q", "Q"))
+    exit 0  # Exit after interactive menu completes
 }
 
+# Parameter-based processing continues below for non-interactive mode ONLY
+# This section only runs when parameters are provided (not interactive mode)
 if ($updatesToProcess.Count -eq 0) {
     Write-Host "No valid updates selected." -ForegroundColor Yellow
+    Read-Host "Press Enter to exit"
+    exit 0
+}
+
+# Validate selected updates for combined SSU/LCU packages
+$selectedKBs = $updatesToProcess | ForEach-Object { Get-NormalizedKBNumber $_.HotFixID }
+if (-not (Validate-KBInput -KBNumbers $selectedKBs)) {
+    Write-Host "Validation failed. Exiting..." -ForegroundColor Yellow
     Read-Host "Press Enter to exit"
     exit 0
 }
@@ -1226,7 +2254,7 @@ if (-not $NoRestorePoint) {
                         Start-Sleep -Seconds 3
                     } catch {
                         Write-Warning "Failed to enable System Restore: $($_.Exception.Message)"
-                        Write-Host "You can manually enable it via: System Properties -> System Protection -> Configure" -ForegroundColor Yellow
+                        Write-Host 'You can manually enable it via: System Properties -> System Protection -> Configure' -ForegroundColor Yellow
                     }
                 }
             }
@@ -1266,7 +2294,7 @@ if (-not $NoRestorePoint) {
             Write-Host "2. Find 'System Restore Service' (SRService)" -ForegroundColor White
             Write-Host "3. Set Startup Type to 'Automatic'" -ForegroundColor White
             Write-Host "4. Start the service" -ForegroundColor White
-            Write-Host "5. Or use: System Properties > System Protection > Configure" -ForegroundColor White
+            Write-Host '5. Or use: System Properties > System Protection > Configure' -ForegroundColor White
             Write-Host "`nAlternative: Use -NoRestorePoint parameter to skip restore point creation" -ForegroundColor Cyan
         }
         
@@ -1376,7 +2404,7 @@ foreach ($update in $updatesToProcess) {
                 Write-Host "   [!] This appears to be a combined SSU/LCU package that cannot be removed via WUSA" -ForegroundColor Yellow
                 Write-Host "   [i] Combined packages contain Servicing Stack Updates (SSU) which are permanent" -ForegroundColor Cyan
                 Write-Host "   [i] Use DISM or PowerShell cmdlets instead" -ForegroundColor Cyan
-                Write-Host "   [i] Settings → Windows Update → Update History → Uninstall updates" -ForegroundColor Cyan
+                Write-Host '   [i] Settings -> Windows Update -> Update History -> Uninstall updates' -ForegroundColor Cyan
             }
         }
 
@@ -1522,7 +2550,7 @@ foreach ($update in $updatesToProcess) {
             Write-Host "  Stop-Service wuauserv,bits,cryptsvc" -ForegroundColor Gray
             Write-Host "  Remove-Item `"`$env:SystemRoot\SoftwareDistribution\*`" -Recurse -Force" -ForegroundColor Gray
             Write-Host "  Start-Service wuauserv,bits,cryptsvc" -ForegroundColor Gray
-            Write-Host "- Check Windows Update history: Settings > Windows Update > Update History" -ForegroundColor White
+            Write-Host '- Check Windows Update history: Settings > Windows Update > Update History' -ForegroundColor White
         }
         
         # Combined SSU/LCU package guidance
@@ -1531,8 +2559,8 @@ foreach ($update in $updatesToProcess) {
             Write-Host "This appears to be a combined Servicing Stack Update (SSU) and Latest Cumulative Update (LCU) package." -ForegroundColor Yellow
             Write-Host "Microsoft states these packages cannot be removed via WUSA because they contain permanent SSU components." -ForegroundColor Yellow
             Write-Host "`nAlternative removal methods:" -ForegroundColor Cyan
-            Write-Host "1. Settings GUI: Settings → Windows Update → Update History → Uninstall updates" -ForegroundColor White
-            Write-Host "2. DISM command: dism /online /get-packages → find package → dism /online /remove-package /packagename:Package_for_KB$kb" -ForegroundColor White
+            Write-Host '1. Settings GUI: Settings -> Windows Update -> Update History -> Uninstall updates' -ForegroundColor White
+            Write-Host "2. DISM command: dism /online /get-packages -> find package -> dism /online /remove-package /packagename:Package_for_KB$kb" -ForegroundColor White
             Write-Host "3. PowerShell: Get-WindowsPackage -Online | Where-Object {`$_.PackageName -like \"*KB$kb*\"} | Remove-WindowsPackage -Online" -ForegroundColor White
             Write-Host "`nNote: SSU components are permanent system updates and cannot be removed." -ForegroundColor Yellow
         }
@@ -1567,19 +2595,19 @@ Selected Updates:
 $($updatesToProcess | ForEach-Object { $normalizedKB = Get-NormalizedKBNumber $_.HotFixID; "KB$($_.HotFixID -replace 'KB', '') [Normalized: KB$normalizedKB] - $($_.Description)" } | Out-String)
 
 System Information:
-- PowerShell Version: $($PSVersionTable.PSVersion)
-- Execution Policy: $(Get-ExecutionPolicy)
-- User: $env:USERNAME
-- Is Admin: $isAdmin
+PowerShell Version: $($PSVersionTable.PSVersion)
+Execution Policy: $(Get-ExecutionPolicy)
+User: $env:USERNAME
+Is Admin: $isAdmin
 
 Error Summary:
 $(if ($failedUpdates.Count -gt 0) { "Failed updates: $($failedUpdates -join ', ')" } else { "No failures detected" })
 
 Detailed Process Log:
-$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - Script started
-$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - Found $($installedUpdates.Count) installed updates
-$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - Selected $($updatesToProcess.Count) updates for removal
-$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - Restore point creation: $($Script:rpCreated)
+Script started: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+Found updates: $($installedUpdates.Count)
+Selected for removal: $($updatesToProcess.Count)
+Restore point created: $($Script:rpCreated)
 "@
 $logContent | Out-File -FilePath $logPath -Encoding UTF8
 Write-Host "Log saved to: $logPath" -ForegroundColor Cyan
@@ -1614,8 +2642,8 @@ if ($failedUpdates.Count -gt 0) {
     Write-Host "7. Consider using Windows 10/11 built-in rollback feature if recent update" -ForegroundColor White
     Write-Host "8. Try Safe Mode: Restart in Safe Mode and run the script again" -ForegroundColor White
     Write-Host "9. Reset Windows Update components:" -ForegroundColor White
-    Write-Host "   - Run: net stop wuauserv && net stop bits && net stop cryptsvc" -ForegroundColor Gray
-    Write-Host "   - Run: ren %systemroot%\SoftwareDistribution SoftwareDistribution.old" -ForegroundColor Gray
-    Write-Host "   - Run: net start wuauserv && net start bits && net start cryptsvc" -ForegroundColor Gray
-    Write-Host "10. Check Event Viewer: Applications and Services Logs > Microsoft > Windows > WindowsUpdateClient" -ForegroundColor White
+    Write-Host "   - Run: net stop wuauserv; net stop bits; net stop cryptsvc" -ForegroundColor Gray
+            Write-Host "   - Run: ren %systemroot%\SoftwareDistribution SoftwareDistribution.old" -ForegroundColor Gray
+            Write-Host "   - Run: net start wuauserv; net start bits; net start cryptsvc" -ForegroundColor Gray
+    Write-Host "10. Check Event Viewer: Applications and Services Logs -> Microsoft -> Windows -> WindowsUpdateClient" -ForegroundColor White
 }
