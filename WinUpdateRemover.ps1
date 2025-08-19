@@ -901,7 +901,7 @@ if ($KBNumbers) {
 
             if ($selection -eq 'back') {
                 # Restart the script to show menu again
-                & $MyInvocation.MyCommand.Path
+                Start-Process -FilePath "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass", "-File", "`"$($MyInvocation.MyCommand.Path)`"" -Verb RunAs
                 exit 0
             }
 
@@ -938,7 +938,7 @@ if ($KBNumbers) {
                 }
             }
             Read-Host "Press Enter to continue"
-            & $MyInvocation.MyCommand.Path
+            Start-Process -FilePath "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass", "-File", "`"$($MyInvocation.MyCommand.Path)`"" -Verb RunAs
             exit 0
         }
         "3" {
@@ -959,7 +959,7 @@ if ($KBNumbers) {
                 }
             }
             Read-Host "Press Enter to continue"
-            & $MyInvocation.MyCommand.Path
+            Start-Process -FilePath "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass", "-File", "`"$($MyInvocation.MyCommand.Path)`"" -Verb RunAs
             exit 0
         }
         "4" {
@@ -981,7 +981,7 @@ if ($KBNumbers) {
                 }
             }
             Read-Host "Press Enter to continue"
-            & $MyInvocation.MyCommand.Path
+            Start-Process -FilePath "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass", "-File", "`"$($MyInvocation.MyCommand.Path)`"" -Verb RunAs
             exit 0
         }
         "5" {
@@ -989,21 +989,21 @@ if ($KBNumbers) {
             Show-BlockingMethods
             Write-Host ""
             Read-Host "Press Enter to continue"
-            & $MyInvocation.MyCommand.Path
+            Start-Process -FilePath "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass", "-File", "`"$($MyInvocation.MyCommand.Path)`"" -Verb RunAs
             exit 0
         }
         "6" {
              # Repair Windows Update
             Invoke-QuickFix
             Read-Host "Press Enter to continue"
-            & $MyInvocation.MyCommand.Path
+            Start-Process -FilePath "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass", "-File", "`"$($MyInvocation.MyCommand.Path)`"" -Verb RunAs
             exit 0
         }
         "7" {
             # Diagnostics
             Invoke-Diagnostic
             Read-Host "Press Enter to continue"
-            & $MyInvocation.MyCommand.Path
+            Start-Process -FilePath "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass", "-File", "`"$($MyInvocation.MyCommand.Path)`"" -Verb RunAs
             exit 0
         }
         "8" {
@@ -1013,7 +1013,7 @@ if ($KBNumbers) {
         default {
             Write-Warning "Invalid choice. Please select 1-8."
             Read-Host "Press Enter to continue"
-            & $MyInvocation.MyCommand.Path
+            Start-Process -FilePath "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass", "-File", "`"$($MyInvocation.MyCommand.Path)`"" -Verb RunAs
             exit 0
         }
     }
