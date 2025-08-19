@@ -34,7 +34,7 @@
 
 .NOTES
     Author: @danalec
-   # Version: 1.0.9
+   # Version: 1.0.10
     Requires: Administrator privileges
     
     Troubleshooting System Restore Issues:
@@ -89,7 +89,7 @@ param(
 )
 
 $Script:ScriptName = "WinUpdateRemover"
-$Script:Version = "v1.0.9"
+$Script:Version = "v1.0.10"
 $ErrorActionPreference = "Stop"
 
 # Check for administrator privileges
@@ -97,6 +97,130 @@ $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIde
 if (-not $isAdmin) {
     Write-Host "This script requires administrator privileges! Please run PowerShell as Administrator and try again." -ForegroundColor Red
     exit 1
+}
+
+# Enhanced DISM Functions for Advanced Package Management
+function Get-DISMPackages {
+    param(
+        [Parameter(Mandatory=$false)]
+        [string]$KBFilter,
+        
+        [Parameter(Mandatory=$false)]
+        [switch]$FormatTable,
+        
+        [Parameter(Mandatory=$false)]
+        [switch]$Clipboard
+    )
+    
+    Write-Host "Retrieving DISM package information..." -ForegroundColor Yellow
+    
+    try {
+        $dismCmd = if ($FormatTable) { 
+            "dism /online /get-packages /format:table" 
+        } else { 
+            "dism /online /get-packages" 
+        }
+        
+        $packages = & cmd /c $dismCmd 2>$null
+        
+        if ($KBFilter) {
+            $packages = $packages | Where-Object { $_ -match "(?i)kb$KBFilter" }
+        }
+        
+        if ($Clipboard) {
+            $packages | clip
+            Write-Host "Package list copied to clipboard!" -ForegroundColor Green
+        }
+        
+        return $packages
+    } catch {
+        Write-Error "Failed to retrieve DISM packages: $($_.Exception.Message)"
+        return $null
+    }
+}
+
+function Test-DISMPackage {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$PackageName
+    )
+    
+    try {
+        Write-Host "Testing DISM package: $PackageName" -ForegroundColor Gray
+        $packageInfo = & dism /online /get-packageinfo /packagename:"$PackageName" 2>$null
+        
+        if ($packageInfo) {
+            $isPermanent = $packageInfo | Where-Object { $_ -match "Permanent : Yes" }
+            $canRemove = -not $isPermanent
+            
+            return [PSCustomObject]@{
+                PackageName = $PackageName
+                Exists = $true
+                IsRemovable = $canRemove
+                IsPermanent = [bool]$isPermanent
+                Details = ($packageInfo -join "`n")
+            }
+        }
+        
+        return [PSCustomObject]@{
+            PackageName = $PackageName
+            Exists = $false
+            IsRemovable = $false
+            IsPermanent = $false
+            Details = "Package not found"
+        }
+    } catch {
+        return [PSCustomObject]@{
+            PackageName = $PackageName
+            Exists = $false
+            IsRemovable = $false
+            IsPermanent = $false
+            Details = $_.Exception.Message
+        }
+    }
+}
+
+function Remove-DISMPackage {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$PackageName,
+        
+        [Parameter(Mandatory=$false)]
+        [switch]$Quiet,
+        
+        [Parameter(Mandatory=$false)]
+        [switch]$NoRestart
+    )
+    
+    $args = "/Online /Remove-Package /PackageName:`"$PackageName`""
+    
+    if ($Quiet) { $args += " /quiet" }
+    if ($NoRestart) { $args += " /norestart" }
+    
+    Write-Host "Executing: dism $args" -ForegroundColor Cyan
+    
+    $process = Start-Process -FilePath "dism.exe" -ArgumentList $args -Wait -PassThru -NoNewWindow
+    
+    # Enhanced error mapping
+    $exitCode = $process.ExitCode
+    $errorMessage = switch ($exitCode) {
+        0 { "Success" }
+        3010 { "Success - restart required" }
+        -2146498555 { "Package not found (0x800f0805)" }
+        -2146498553 { "Package is permanent (0x800f0807)" }
+        -2146498552 { "Restart required (0x800f0808)" }
+        87 { "Invalid parameter" }
+        5 { "Access denied" }
+        112 { "Insufficient disk space" }
+        default { "Unknown error (Exit code: $exitCode)" }
+    }
+    
+    return [PSCustomObject]@{
+        Success = ($exitCode -eq 0 -or $exitCode -eq 3010)
+        ExitCode = $exitCode
+        Message = $errorMessage
+        PackageName = $PackageName
+    }
 }
 
 # Display header
@@ -255,9 +379,18 @@ $problematicKBs = @(
     # Windows 10 22H2 - HIGH/MEDIUM Issues (2025)
     'KB5062649',  # HIGH: Emoji Panel broken, performance issues - Jul 2025 - ACTIVE ISSUE
     'KB5062554',  # HIGH: Various system issues - Jul 2025 - ACTIVE ISSUE  
-    'KB5055518',  # MEDIUM: Random text when printing - Apr 2025 - Fixed
-    'KB5046714',  # MEDIUM: Packaged apps update/uninstall failures - Nov 2024 - Fixed
-    'KB5057589'   # LOW: Windows RE update shows as failed - Apr 2025 - Fixed
+    
+    # Combined SSU/LCU packages - Cannot be removed via WUSA
+    'KB5063878',
+    'KB5062839',
+    'KB5062978',
+    'KB5034441',
+    'KB5034127',
+    'KB5031356',
+    'KB5029331',
+    'KB5028166',
+    'KB5027231',
+    'KB5025221'
 )
 
 # Scan for installed updates
@@ -310,13 +443,19 @@ function Verify-KB {
     # 2. Check via DISM
     Write-Host "2. Checking via DISM..." -ForegroundColor Yellow
     try {
-        $dismOutput = dism /online /get-packages | findstr /i "kb$KBNumber"
-        if ($dismOutput) {
-            Write-Host "   [OK] FOUND: KB$KBNumber in DISM packages" -ForegroundColor Green
-            Write-Host "   Package info: $dismOutput" -ForegroundColor White
-            $found = $true
+        # Check if DISM is available
+        $dismAvailable = Get-Command "dism.exe" -ErrorAction SilentlyContinue
+        if (-not $dismAvailable) {
+            Write-Host "   [X] DISM command not available" -ForegroundColor Red
         } else {
-            Write-Host "   [X] NOT FOUND via DISM packages" -ForegroundColor Red
+            $dismOutput = & dism /online /get-packages 2>$null | Where-Object { $_ -match "kb$KBNumber" -and $_ -match "Package" }
+            if ($dismOutput) {
+                Write-Host "   [OK] FOUND: KB$KBNumber in DISM packages" -ForegroundColor Green
+                Write-Host "   Package info: $dismOutput" -ForegroundColor White
+                $found = $true
+            } else {
+                Write-Host "   [X] NOT FOUND via DISM packages" -ForegroundColor Red
+            }
         }
     } catch {
         Write-Host "   [X] Error checking DISM: $($_.Exception.Message)" -ForegroundColor Red
@@ -1207,101 +1346,119 @@ foreach ($update in $updatesToProcess) {
             # Silently continue if Windows Update log access fails
         }
         
-        # Method 1: Try to find actual package name using DISM
-        Write-Host "Searching for package information..." -ForegroundColor Gray
-        try {
-            $dismOutput = & dism /online /get-packages 2>$null
-            $packageLines = $dismOutput | Where-Object { $_ -match "kb$kb" -and $_ -match "Package_for_KB" }
+        # Method 1: Universal WUSA approach (fastest, try first)
+        Write-Host "Trying Windows Update Standalone Installer (WUSA)..." -ForegroundColor Gray
+        
+        # Clean KB input for WUSA (remove KB prefix)
+        $cleanKB = $kb -replace "^KB", ""
+        
+        $wusaArgs = "/uninstall", "/kb:$cleanKB", "/quiet", "/norestart"
+        $wusaProcess = Start-Process -FilePath "wusa.exe" -ArgumentList $wusaArgs -Wait -PassThru -NoNewWindow
+        
+        if ($wusaProcess.ExitCode -eq 0 -or $wusaProcess.ExitCode -eq 3010) {
+            $removeSuccess = $true
+            $removalMethods += "WUSA"
+            Write-Host "Successfully removed via WUSA" -ForegroundColor Green
+        } else {
+            $wusaError = switch ($wusaProcess.ExitCode) {
+                5 { "Access denied - requires administrator privileges" }
+                87 { "Invalid parameter - KB may not exist or format incorrect" }
+                2359302 { "Update not found or not applicable - may be combined SSU/LCU package" }
+                3010 { "Success, restart required" }
+                default { "WUSA error code: $($wusaProcess.ExitCode)" }
+            }
+            Write-Host "   [!] WUSA failed: $wusaError" -ForegroundColor Yellow
+            $errorDetails += "WUSA: $wusaError"
             
-            if ($packageLines) {
-                foreach ($line in $packageLines) {
-                    # Extract package name from different possible formats
-                    if ($line -match "Package Name : (.+)$") {
-                        $packageName = $matches[1].Trim()
-                    } elseif ($line -match "(Package_for_KB\d+[^\s]+)") {
-                        $packageName = $matches[1].Trim()
-                    } else {
-                        # Try to extract the last part after splitting by spaces
-                        $parts = $line -split '\s+'
-                        $packageName = ($parts | Where-Object { $_ -match "Package_for_KB$kb" })[-1]
-                    }
+            # Check for combined SSU/LCU packages
+            $combinedSSUPackages = @("5063878", "5062839", "5062978", "5034441", "5034127", "5031356", "5029331", "5028166", "5027231", "5025221")
+            if ($combinedSSUPackages -contains $cleanKB -and $wusaProcess.ExitCode -eq 2359302) {
+                Write-Host "   [!] This appears to be a combined SSU/LCU package that cannot be removed via WUSA" -ForegroundColor Yellow
+                Write-Host "   [i] Combined packages contain Servicing Stack Updates (SSU) which are permanent" -ForegroundColor Cyan
+                Write-Host "   [i] Use DISM or PowerShell cmdlets instead" -ForegroundColor Cyan
+                Write-Host "   [i] Settings → Windows Update → Update History → Uninstall updates" -ForegroundColor Cyan
+            }
+        }
+
+        # Method 2: Universal DISM package discovery and removal (robust fallback)
+        if (-not $removeSuccess) {
+            Write-Host "Trying universal DISM package discovery..." -ForegroundColor Gray
+            
+            # Check if DISM is available
+            $dismAvailable = Get-Command "dism.exe" -ErrorAction SilentlyContinue
+            if (-not $dismAvailable) {
+                Write-Host "DISM command not available, skipping DISM methods" -ForegroundColor Yellow
+                $errorDetails += "DISM not available on this system"
+            } else {
+                # Clean KB input for DISM search
+                $cleanKB = $kb -replace "^KB", ""
+                
+                # Dynamic DISM package discovery
+                Write-Host "Searching for KB$cleanKB packages dynamically..." -ForegroundColor Gray
+                try {
+                    $dismOutput = & dism /online /get-packages /format:table 2>$null
+                    $kbPackages = $dismOutput | Where-Object { $_ -match "Package.*KB$cleanKB" -or $_ -match "KB$cleanKB.*Package" }
                     
-                    if ($packageName -and $packageName -match "Package_for_KB$kb") {
-                        Write-Host "Found package: $packageName" -ForegroundColor Green
-                        $dismArgs = "/Online /Remove-Package /PackageName:$packageName /quiet /norestart"
-                        $process = Start-Process -FilePath "dism.exe" -ArgumentList $dismArgs -Wait -PassThru -NoNewWindow
-                        if ($process.ExitCode -eq 0 -or $process.ExitCode -eq 3010) {
-                            $removeSuccess = $true
-                            $removalMethods += "DISM (auto-detected: $packageName)"
-                            break
-                        } else {
-                            # Handle specific DISM error codes
-                            if ($process.ExitCode -eq -2146498555) {
-                                $errorDetails += "DISM error: Package not found in component store (0x800f0805)"
-                            } else {
-                                $errorDetails += "DISM auto-detect exit code: $($process.ExitCode) for $packageName"
+                    if ($kbPackages) {
+                        Write-Host "Found KB$cleanKB in DISM packages" -ForegroundColor Green
+                        
+                        foreach ($packageLine in $kbPackages) {
+                            if ($packageLine -match "Package Identity : (.*)") {
+                                $packageName = $matches[1].Trim()
+                                Write-Host "Testing package: $packageName" -ForegroundColor Gray
+                                
+                                # Check if package is removable
+                                $testResult = Test-DISMPackage -PackageName $packageName
+                                if ($testResult.Exists -and $testResult.IsRemovable) {
+                                    $result = Remove-DISMPackage -PackageName $packageName -Quiet -NoRestart
+                                    if ($result.Success) {
+                                        $removeSuccess = $true
+                                        $removalMethods += "DISM (dynamic discovery: $packageName)"
+                                        Write-Host "   $($result.Message)" -ForegroundColor Green
+                                        break
+                                    } else {
+                                        Write-Host "   [!] $($result.Message)" -ForegroundColor Yellow
+                                        $errorDetails += "DISM dynamic: $($result.Message)"
+                                    }
+                                } elseif ($testResult.Exists -and -not $testResult.IsRemovable) {
+                                    Write-Host "   [!] Package is permanent" -ForegroundColor Yellow
+                                    $errorDetails += "Package $packageName is permanent"
+                                }
                             }
                         }
+                    } else {
+                        Write-Host "KB$cleanKB not found in DISM packages" -ForegroundColor Gray
+                    }
+                } catch {
+                    Write-Host "   [!] DISM search error: $($_.Exception.Message)" -ForegroundColor Yellow
+                    $errorDetails += "DISM search failed: $($_.Exception.Message)"
+                }
+            }
+        }
+
+        # Method 3: PowerShell cmdlets (Windows 10+ fallback)
+        if (-not $removeSuccess) {
+            Write-Host "Trying PowerShell Remove-WindowsPackage..." -ForegroundColor Gray
+            try {
+                $cleanKB = $kb -replace "^KB", ""
+                $psPackages = Get-WindowsPackage -Online -ErrorAction SilentlyContinue | 
+                    Where-Object { $_.PackageName -like "*KB$cleanKB*" }
+                
+                foreach ($package in $psPackages) {
+                    Write-Host "Found PowerShell package: $($package.PackageName)" -ForegroundColor Green
+                    try {
+                        Remove-WindowsPackage -Online -PackageName $package.PackageName -NoRestart -ErrorAction Stop
+                        $removeSuccess = $true
+                        $removalMethods += "PowerShell cmdlet ($($package.PackageName))"
+                        Write-Host "Successfully removed via PowerShell cmdlet" -ForegroundColor Green
+                        break
+                    } catch {
+                        Write-Host "   [!] PowerShell removal failed: $($_.Exception.Message)" -ForegroundColor Yellow
+                        $errorDetails += "PowerShell: $($_.Exception.Message)"
                     }
                 }
-                
-                if (-not $removeSuccess) {
-                    Write-Host "Package(s) found but removal failed" -ForegroundColor Yellow
-                }
-            } else {
-                Write-Host "No package found with KB$kb in DISM" -ForegroundColor Yellow
-                $errorDetails += "Package not found in DISM"
-            }
-        } catch {
-            Write-Host "Error querying DISM packages: $($_.Exception.Message)" -ForegroundColor Red
-            $errorDetails += "DISM query error: $($_.Exception.Message)"
-        }
-        
-        # Method 2: Try multiple DISM package name formats
-        if (-not $removeSuccess) {
-            Write-Host "Trying multiple DISM package formats..." -ForegroundColor Gray
-            
-            # Get system architecture
-            $arch = if ([Environment]::Is64BitOperatingSystem) { "amd64" } else { "x86" }
-            
-            # Try different package naming patterns
-            $packageFormats = @(
-                "Package_for_KB$kb~31bf3856ad364e35~$arch~~",
-                "Package_for_KB$kb~31bf3856ad364e35~$arch~en~",
-                "Package_for_KB$kb~31bf3856ad364e35~$arch~~6.1.1.0",
-                "Package_for_KB$kb~31bf3856ad364e35~$arch~~6.2.1.1",
-                "Package_for_KB$kb~31bf3856ad364e35~$arch~~6.3.1.0",
-                "Package_for_KB$kb~31bf3856ad364e35~$arch~~10.0.1.0"
-            )
-            
-            foreach ($packageFormat in $packageFormats) {
-                $dismArgs = "/Online /Remove-Package /PackageName:$packageFormat /quiet /norestart"
-                $process = Start-Process -FilePath "dism.exe" -ArgumentList $dismArgs -Wait -PassThru -NoNewWindow
-                if ($process.ExitCode -eq 0 -or $process.ExitCode -eq 3010) {
-                    $removeSuccess = $true
-                    $removalMethods += "DISM (format: $packageFormat)"
-                    break
-                } elseif ($process.ExitCode -ne -2146498555) {
-                    # If it's not "package not found", it might be a different error worth noting
-                    $errorDetails += "DISM format $packageFormat exit code: $($process.ExitCode)"
-                }
-            }
-            
-            if (-not $removeSuccess) {
-                $errorDetails += "DISM error: Package not found with any standard naming format"
-            }
-        }
-        
-        # Method 3: Try WUSA with KB number
-        if (-not $removeSuccess) {
-            Write-Host "Trying Windows Update Standalone Installer..." -ForegroundColor Gray
-            $wusaArgs = "/uninstall /kb:$kb /quiet /norestart"
-            $process2 = Start-Process -FilePath "wusa.exe" -ArgumentList $wusaArgs -Wait -PassThru -NoNewWindow
-            if ($process2.ExitCode -eq 0 -or $process2.ExitCode -eq 3010) {
-                $removeSuccess = $true
-                $removalMethods += "WUSA"
-            } else {
-                $errorDetails += "WUSA exit code: $($process2.ExitCode)"
+            } catch {
+                Write-Host "   [!] PowerShell cmdlets not available or failed: $($_.Exception.Message)" -ForegroundColor Gray
             }
         }
         
@@ -1366,6 +1523,18 @@ foreach ($update in $updatesToProcess) {
             Write-Host "  Remove-Item `"`$env:SystemRoot\SoftwareDistribution\*`" -Recurse -Force" -ForegroundColor Gray
             Write-Host "  Start-Service wuauserv,bits,cryptsvc" -ForegroundColor Gray
             Write-Host "- Check Windows Update history: Settings > Windows Update > Update History" -ForegroundColor White
+        }
+        
+        # Combined SSU/LCU package guidance
+        if ($errorDetails -like "*combined*SSU*LCU*" -or $errorDetails -like "*KB5063878*" -or $errorDetails -like "*KB5062839*" -or $errorDetails -like "*KB5062978*") {
+            Write-Host "`n--- Combined SSU/LCU Package Guidance ---" -ForegroundColor Red
+            Write-Host "This appears to be a combined Servicing Stack Update (SSU) and Latest Cumulative Update (LCU) package." -ForegroundColor Yellow
+            Write-Host "Microsoft states these packages cannot be removed via WUSA because they contain permanent SSU components." -ForegroundColor Yellow
+            Write-Host "`nAlternative removal methods:" -ForegroundColor Cyan
+            Write-Host "1. Settings GUI: Settings → Windows Update → Update History → Uninstall updates" -ForegroundColor White
+            Write-Host "2. DISM command: dism /online /get-packages → find package → dism /online /remove-package /packagename:Package_for_KB$kb" -ForegroundColor White
+            Write-Host "3. PowerShell: Get-WindowsPackage -Online | Where-Object {`$_.PackageName -like \"*KB$kb*\"} | Remove-WindowsPackage -Online" -ForegroundColor White
+            Write-Host "`nNote: SSU components are permanent system updates and cannot be removed." -ForegroundColor Yellow
         }
         
         $failedUpdates.Add($kb)
