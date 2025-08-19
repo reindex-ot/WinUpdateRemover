@@ -3,7 +3,7 @@
 [![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-blue.svg)](https://docs.microsoft.com/en-us/powershell/)
 [![Windows](https://img.shields.io/badge/Windows-10%2F11-brightgreen.svg)](https://www.microsoft.com/windows)
 [![License](https://img.shields.io/badge/License-Unlicense-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-1.1-red.svg)](https://github.com/danalec/WinUpdateRemover/releases)
+[![Version](https://img.shields.io/badge/Version-1.2-red.svg)](https://github.com/danalec/WinUpdateRemover/releases)
 [![Author](https://img.shields.io/badge/Author-@danalec-orange.svg)](https://github.com/danalec)
 
 > **Safely remove problematic Windows Updates with automatic restore point protection**
@@ -14,11 +14,14 @@ WinUpdateRemover is an interactive PowerShell tool designed to help Windows admi
 
 - **Safe Removal Process**: Automatic System Restore point creation before any changes
 - **Targeted Removal**: Remove specific problematic updates (like KB5063878 causing SSD issues)
-- **Custom KB Support**: Add your own KB numbers for removal
+- **Enhanced Error Handling**: Improved handling for 0x800f0805 and other common errors
+- **Multi-Method Removal**: Four different removal approaches (DISM auto-detect, DISM standard, WUSA, Windows Update API)
 - **Smart Detection**: Automatically checks if updates are installed before attempting removal
 - **Interactive Mode**: Step-by-step guidance with confirmation prompts
-- **Detailed Logging**: Clear status reports and operation summaries
-- **Multiple Removal Methods**: Uses both DISM and WUSA for maximum compatibility
+- **Detailed Logging**: Comprehensive logs with system info and error details
+- **Troubleshooting Guide**: Built-in guidance for common removal failures
+- **Custom KB Support**: Add your own KB numbers for removal
+- **KB Number Normalization**: Handles various KB formats consistently (KB1234567, 1234567, etc.)
 - **Batch Processing**: Remove multiple updates in a single session
 
 ## Requirements
@@ -131,7 +134,69 @@ iex ((New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.co
 | `-KBNumbers` | String[] | Specific KB numbers to remove | `-KBNumbers "KB5063878","KB5055523"` |
 | `-NoRestorePoint` | Switch | Skip System Restore point creation | `-NoRestorePoint` |
 
-### Advanced Usage Scenarios
+### Troubleshooting
+
+### Common Errors and Solutions
+
+#### Error 0x800f0805: "指定したパッケージは無効な Windows パッケージです"
+This error indicates the update package is invalid or not found. This commonly occurs when:
+- The update has already been removed
+- The package name format is incorrect
+- Windows Update components are corrupted
+
+**Solutions:**
+1. **Verify update status**: Check if the update is actually installed
+2. **Run Windows Update Troubleshooter**: Settings > System > Troubleshoot > Other troubleshooters
+3. **Repair Windows Update**: Run `DISM /Online /Cleanup-Image /RestoreHealth` then `sfc /scannow`
+4. **Check Windows Update history**: Review what updates were recently installed/removed
+
+#### Error: "サービスは、無効であるか、または関連付けられた有効なデバイスがないため、開始できません"
+This indicates System Restore service is disabled.
+
+**Solutions:**
+1. **Enable System Restore**:
+   ```powershell
+   Enable-ComputerRestore -Drive $env:SystemDrive
+   ```
+2. **Start Volume Shadow Copy service**:
+   ```powershell
+   Start-Service -Name VSS
+   ```
+3. **Skip restore point**: Use `-NoRestorePoint` parameter (not recommended for production)
+
+#### Error: "Failed to remove KB..."
+General removal failure with multiple potential causes.
+
+**Solutions:**
+1. **Restart Windows Update service**:
+   ```powershell
+   Restart-Service -Name wuauserv
+   Restart-Service -Name bits
+   ```
+2. **Clear Windows Update cache**:
+   ```powershell
+   Stop-Service wuauserv
+   Remove-Item -Path "$env:SystemRoot\SoftwareDistribution\Download\*" -Recurse -Force
+   Start-Service wuauserv
+   ```
+3. **Use Safe Mode**: Boot into Safe Mode and run the script
+4. **Manual removal**: Use Windows Settings > Windows Update > Update History > Uninstall Updates
+
+### Log Analysis
+The script creates detailed logs in `%TEMP%\WinUpdateRemover_*.log`. Check these logs for:
+- Specific error codes
+- System information
+- Attempted removal methods
+- Detailed error messages
+
+### Getting Help
+If issues persist:
+1. Check the GitHub issues page: [WinUpdateRemover Issues](https://github.com/danalec/WinUpdateRemover/issues)
+2. Include the log file when reporting issues
+3. Provide system information from the log
+4. Check Windows Event Viewer for additional error details
+
+## Advanced Usage Scenarios
 
 #### Automation & Scheduling
 ```powershell
@@ -313,7 +378,8 @@ The authors are not responsible for any damage or data loss.
 
 | Version | Date | Changes |
 |---------|------|---------|
-| 1.0 | 2025-08-18 | Initial release with comprehensive safety features |
+| 1.0   | 2025-08-18 | Initial release with comprehensive safety features |
+| 1.0.1 | 2025-08-19 | Added support for custom KB numbers and improved error handling |
 
 ---
 

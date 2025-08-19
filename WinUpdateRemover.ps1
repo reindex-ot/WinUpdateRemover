@@ -8,7 +8,7 @@
 
 .NOTES
     Author: @danalec
-    Version: 1.0
+    Version: 1.0.1
     Requires: Administrator privileges
 #>
 
@@ -29,7 +29,7 @@ param(
 )
 
 $Script:ScriptName = "WinUpdateRemover"
-$Script:Version = "1.1"
+$Script:Version = "1.0.1"
 $ErrorActionPreference = "Stop"
 
 # Check for administrator privileges
@@ -84,11 +84,20 @@ $problematicKBs = @(
 # Scan for installed updates
 Write-Host "Scanning for installed updates..." -ForegroundColor Yellow
 try {
-    $installedUpdates = Get-HotFix | Sort-Object {[DateTime]$_.InstalledOn} -Descending
+    $installedUpdates = Get-HotFix | Where-Object { $_.HotFixID -match 'KB\d+' } | Sort-Object {[DateTime]$_.InstalledOn} -Descending
     Write-Host "Found $($installedUpdates.Count) installed updates." -ForegroundColor Green
 } catch {
     Write-Error "Error scanning for updates: $($_.Exception.Message)"
     exit 1
+}
+
+# Function to normalize KB numbers
+function Get-NormalizedKBNumber {
+    param([string]$rawKB)
+    if ($rawKB -match 'KB\s*(\d+)') {
+        return $matches[1]
+    }
+    return $null
 }
 
 if ($installedUpdates.Count -eq 0) {
@@ -105,7 +114,8 @@ for ($i = 0; $i -lt $installedUpdates.Count; $i++) {
     $installDate = if ($update.InstalledOn) { $update.InstalledOn.ToString("yyyy-MM-dd") } else { "Unknown" }
     
     # Check if this is a problematic KB
-    $isProblematic = $problematicKBs -contains $update.HotFixID
+    $normalizedKB = Get-NormalizedKBNumber $update.HotFixID
+    $isProblematic = $normalizedKB -and ($problematicKBs -contains "KB$normalizedKB")
     
     if ($isProblematic) {
         Write-Host "[$($i+1)] $($update.HotFixID) - $($update.Description) (Installed: $installDate)" -ForegroundColor Red -BackgroundColor Yellow
@@ -123,7 +133,11 @@ if ($problematicCount -gt 0) {
 
 # Handle KBNumbers parameter
 if ($KBNumbers) {
-    $updatesToProcess = $installedUpdates | Where-Object { $KBNumbers -contains $_.HotFixID }
+    $normalizedKBNumbers = $KBNumbers | ForEach-Object { Get-NormalizedKBNumber $_ }
+    $updatesToProcess = $installedUpdates | Where-Object { 
+        $normalizedKB = Get-NormalizedKBNumber $_.HotFixID
+        $normalizedKB -and ($normalizedKBNumbers -contains $normalizedKB)
+    }
     if ($updatesToProcess.Count -eq 0) {
         Write-Warning "None of the specified KB numbers were found installed."
         exit 0
@@ -216,8 +230,13 @@ $processedCount = 0
 $failedUpdates = [System.Collections.Generic.List[string]]::new()
 
 foreach ($update in $updatesToProcess) {
-    $kb = $update.HotFixID -replace 'KB', ''
+    $kb = Get-NormalizedKBNumber $update.HotFixID
     $desc = $update.Description
+    
+    if (-not $kb) {
+        Write-Warning "Could not extract KB number from: $($update.HotFixID)"
+        continue
+    }
     
     # Check if this is a problematic KB
     $isProblematicKB = $problematicKBs -contains "KB$kb"
@@ -247,29 +266,98 @@ foreach ($update in $updatesToProcess) {
     Write-Host "Removing KB$kb..." -ForegroundColor Red
     
     $removeSuccess = $false
+    $removalMethods = @()
+    $errorDetails = @()
+    
     try {
-        # Try DISM first
-        $dismArgs = "/Online /Remove-Package /PackageName:Package_for_KB$kb~31bf3856ad364e35~amd64~~ /quiet /norestart"
-        $process = Start-Process -FilePath "dism.exe" -ArgumentList $dismArgs -Wait -PassThru -NoNewWindow
+        # Method 1: Try to find actual package name using DISM
+        Write-Host "Searching for package information..." -ForegroundColor Gray
+        $packageInfo = dism /online /get-packages | findstr /i "kb$kb"
+        if ($packageInfo) {
+            $packageName = ($packageInfo -split '\s+')[-1]
+            if ($packageName -match "Package_for_KB$kb") {
+                $dismArgs = "/Online /Remove-Package /PackageName:$packageName /quiet /norestart"
+                $process = Start-Process -FilePath "dism.exe" -ArgumentList $dismArgs -Wait -PassThru -NoNewWindow
+                if ($process.ExitCode -eq 0 -or $process.ExitCode -eq 3010) {
+                    $removeSuccess = $true
+                    $removalMethods += "DISM (auto-detected package)"
+                } else {
+                    $errorDetails += "DISM auto-detect exit code: $($process.ExitCode)"
+                }
+            }
+        }
         
-        if ($process.ExitCode -eq 0 -or $process.ExitCode -eq 3010) {
-            $removeSuccess = $true
-        } else {
-            # Fallback to WUSA
+        # Method 2: Try standard DISM package name format
+        if (-not $removeSuccess) {
+            Write-Host "Trying standard DISM package format..." -ForegroundColor Gray
+            $dismArgs = "/Online /Remove-Package /PackageName:Package_for_KB$kb~31bf3856ad364e35~amd64~~ /quiet /norestart"
+            $process = Start-Process -FilePath "dism.exe" -ArgumentList $dismArgs -Wait -PassThru -NoNewWindow
+            if ($process.ExitCode -eq 0 -or $process.ExitCode -eq 3010) {
+                $removeSuccess = $true
+                $removalMethods += "DISM (standard format)"
+            } else {
+                $errorDetails += "DISM standard format exit code: $($process.ExitCode)"
+            }
+        }
+        
+        # Method 3: Try WUSA with KB number
+        if (-not $removeSuccess) {
+            Write-Host "Trying Windows Update Standalone Installer..." -ForegroundColor Gray
             $wusaArgs = "/uninstall /kb:$kb /quiet /norestart"
             $process2 = Start-Process -FilePath "wusa.exe" -ArgumentList $wusaArgs -Wait -PassThru -NoNewWindow
-            $removeSuccess = ($process2.ExitCode -eq 0 -or $process2.ExitCode -eq 3010)
+            if ($process2.ExitCode -eq 0 -or $process2.ExitCode -eq 3010) {
+                $removeSuccess = $true
+                $removalMethods += "WUSA"
+            } else {
+                $errorDetails += "WUSA exit code: $($process2.ExitCode)"
+            }
         }
+        
+        # Method 4: Try PowerShell Windows Update API
+        if (-not $removeSuccess) {
+            Write-Host "Trying Windows Update API..." -ForegroundColor Gray
+            try {
+                $session = New-Object -ComObject "Microsoft.Update.Session"
+                $searcher = $session.CreateUpdateSearcher()
+                $updates = $searcher.Search("IsInstalled=1 and Type='Software'")
+                
+                foreach ($update in $updates.Updates) {
+                    if ($update.KBArticleIDs -contains $kb) {
+                        $installer = $update.CreateUpdateInstaller()
+                        $installationResult = $installer.Uninstall()
+                        if ($installationResult.ResultCode -eq 2) {
+                            $removeSuccess = $true
+                            $removalMethods += "Windows Update API"
+                            break
+                        }
+                    }
+                }
+            } catch {
+                $errorDetails += "Windows Update API error: $($_.Exception.Message)"
+            }
+        }
+        
     } catch {
+        $errorDetails += "Exception during removal: $($_.Exception.Message)"
         Write-Error "Exception during removal: $($_.Exception.Message)"
         $removeSuccess = $false
     }
     
     if ($removeSuccess) {
-        Write-Host "KB$kb removal initiated successfully!" -ForegroundColor Green
+        $methodUsed = if ($removalMethods.Count -gt 0) { " using $($removalMethods[-1])" } else { "" }
+        Write-Host "KB$kb removal initiated successfully$methodUsed!" -ForegroundColor Green
         $processedCount++
     } else {
         Write-Error "Failed to remove KB$kb"
+        Write-Host "Attempted methods: $($removalMethods -join ', ')" -ForegroundColor Gray
+        Write-Host "Error details: $($errorDetails -join '; ')" -ForegroundColor Gray
+        
+        # Provide specific guidance for common errors
+        if ($errorDetails -like "*0x800f0805*" -or $errorDetails -like "*invalid*package*") {
+            Write-Host "This error typically means the update package is not found or corrupted." -ForegroundColor Yellow
+            Write-Host "Try running Windows Update Troubleshooter or manually check Windows Update settings." -ForegroundColor Yellow
+        }
+        
         $failedUpdates.Add($kb)
     }
 }
@@ -282,16 +370,37 @@ if ($failedUpdates.Count -gt 0) {
     Write-Host "Failed removals: $($failedUpdates -join ', ')" -ForegroundColor Red
 }
 
-# Create log file
+# Create detailed log file
 $logPath = Join-Path -Path $env:TEMP -ChildPath "WinUpdateRemover_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 $logContent = @"
 Windows Update Remover Log
 =========================
 Date: $(Get-Date)
 Computer: $env:COMPUTERNAME
+OS: $(Get-CimInstance Win32_OperatingSystem | Select-Object -ExpandProperty Caption)
+Version: $(Get-CimInstance Win32_OperatingSystem | Select-Object -ExpandProperty Version)
+
 Updates processed: $processedCount
 Failed removals: $($failedUpdates -join ', ')
 Restore point created: $($Script:rpCreated)
+
+Selected Updates:
+$($updatesToProcess | ForEach-Object { $normalizedKB = Get-NormalizedKBNumber $_.HotFixID; "KB$($_.HotFixID -replace 'KB', '') [Normalized: KB$normalizedKB] - $($_.Description)" } | Out-String)
+
+System Information:
+- PowerShell Version: $($PSVersionTable.PSVersion)
+- Execution Policy: $(Get-ExecutionPolicy)
+- User: $env:USERNAME
+- Is Admin: $isAdmin
+
+Error Summary:
+$(if ($failedUpdates.Count -gt 0) { "Failed updates: $($failedUpdates -join ', ')" } else { "No failures detected" })
+
+Detailed Process Log:
+$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - Script started
+$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - Found $($installedUpdates.Count) installed updates
+$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - Selected $($updatesToProcess.Count) updates for removal
+$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - Restore point creation: $($Script:rpCreated)
 "@
 $logContent | Out-File -FilePath $logPath -Encoding UTF8
 Write-Host "Log saved to: $logPath" -ForegroundColor Cyan
@@ -313,3 +422,15 @@ if ($processedCount -gt 0) {
 
 Write-Host "`nThank you for using Windows Update Remover!" -ForegroundColor Green
 Write-Host "GitHub: https://github.com/danalec/WinUpdateRemover" -ForegroundColor Cyan
+
+if ($failedUpdates.Count -gt 0) {
+    Write-Host "`n--- Troubleshooting Guide ---" -ForegroundColor Cyan
+    Write-Host "For failed update removals, try these steps:" -ForegroundColor Yellow
+    Write-Host "1. Run Windows Update Troubleshooter: Settings > System > Troubleshoot > Other troubleshooters" -ForegroundColor White
+    Write-Host "2. Check Windows Update service: Run 'services.msc' and ensure Windows Update is running" -ForegroundColor White
+    Write-Host "3. Run System File Checker: Open Command Prompt as admin and run 'sfc /scannow'" -ForegroundColor White
+    Write-Host "4. Use DISM to repair Windows: 'DISM /Online /Cleanup-Image /RestoreHealth'" -ForegroundColor White
+    Write-Host "5. For 0x800f0805 errors: The update may already be removed or corrupted" -ForegroundColor White
+    Write-Host "6. Check Windows Update history for more details about the failure" -ForegroundColor White
+    Write-Host "7. Consider using Windows 10/11 built-in rollback feature if recent update" -ForegroundColor White
+}
