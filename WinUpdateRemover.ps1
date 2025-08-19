@@ -34,7 +34,7 @@
 
 .NOTES
     Author: @danalec
-    Version: 1.0.6
+    Version: 1.0.7
     Requires: Administrator privileges
     
     Troubleshooting System Restore Issues:
@@ -89,13 +89,13 @@ param(
 )
 
 $Script:ScriptName = "WinUpdateRemover"
-$Script:Version = "v1.0.6"
+$Script:Version = "v1.0.7"
 $ErrorActionPreference = "Stop"
 
 # Check for administrator privileges
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")
 if (-not $isAdmin) {
-    Write-Error "This script requires administrator privileges! Please run PowerShell as Administrator and try again."
+    Write-Host "This script requires administrator privileges! Please run PowerShell as Administrator and try again." -ForegroundColor Red
     exit 1
 }
 
@@ -266,7 +266,7 @@ try {
     $installedUpdates = Get-HotFix | Where-Object { $_.HotFixID -match 'KB\d+' } | Sort-Object {[DateTime]$_.InstalledOn} -Descending
     Write-Host "Found $($installedUpdates.Count) installed updates." -ForegroundColor Green
 } catch {
-    Write-Error "Error scanning for updates: $($_.Exception.Message)"
+    Write-Host "Error scanning for updates: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
 }
 
@@ -1286,7 +1286,7 @@ foreach ($update in $updatesToProcess) {
         
     } catch {
         $errorDetails += "Exception during removal: $($_.Exception.Message)"
-        Write-Error "Exception during removal: $($_.Exception.Message)"
+        Write-Host "Exception during removal: $($_.Exception.Message)" -ForegroundColor Red
         $removeSuccess = $false
     }
     
@@ -1295,7 +1295,7 @@ foreach ($update in $updatesToProcess) {
         Write-Host "KB$kb removal initiated successfully$methodUsed!" -ForegroundColor Green
         $processedCount++
     } else {
-        Write-Error "Failed to remove KB$kb"
+        Write-Host "Failed to remove KB$kb" -ForegroundColor Red
         Write-Host "Attempted methods: $($removalMethods -join ', ')" -ForegroundColor Gray
         Write-Host "Error details: $($errorDetails -join '; ')" -ForegroundColor Gray
         
