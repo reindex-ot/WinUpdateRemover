@@ -24,11 +24,22 @@
     - Verify KB: .\WinUpdateRemover.ps1 -Verify -KBNumbers "KB5063878"
     - Quick Fix: .\WinUpdateRemover.ps1 -QuickFix
     - Diagnostic: .\WinUpdateRemover.ps1 -Diagnostic
+    - Enable System Restore: .\WinUpdateRemover.ps1 -EnableSystemRestore
 
 .NOTES
     Author: @danalec
-    Version: 1.0.2
+    Version: 1.0.4
     Requires: Administrator privileges
+    
+    Troubleshooting System Restore Issues:
+    If restore point creation fails with "service cannot be started":
+    1. Run: services.msc
+    2. Find "System Restore Service" (SRService)
+    3. Set Startup Type to "Automatic"
+    4. Start the service
+    5. Re-run the script
+    
+    Alternative: Use -NoRestorePoint parameter to skip restore point creation
 #>
 
 # Script configuration
@@ -53,11 +64,14 @@ param(
     [switch]$QuickFix,
     
     [Parameter(Mandatory=$false)]
-    [switch]$Diagnostic
+    [switch]$Diagnostic,
+    
+    [Parameter(Mandatory=$false)]
+    [switch]$EnableSystemRestore
 )
 
 $Script:ScriptName = "WinUpdateRemover"
-$Script:Version = "v1.0.2"
+$Script:Version = "v1.0.4"
 $ErrorActionPreference = "Stop"
 
 # Check for administrator privileges
@@ -117,6 +131,11 @@ if ($QuickFix) {
 
 if ($Diagnostic) {
     Invoke-Diagnostic
+    exit 0
+}
+
+if ($EnableSystemRestore) {
+    Invoke-EnableSystemRestore
     exit 0
 }
 
@@ -373,6 +392,76 @@ function Invoke-QuickFix {
     Write-Host "   3. If issues persist, run .\WinUpdateRemover.ps1 -Diagnostic" -ForegroundColor White
 }
 
+# Function to enable System Restore service
+function Invoke-EnableSystemRestore {
+    try {
+        Write-Host "=== System Restore Service Enabler ===" -ForegroundColor Cyan
+        Write-Host "This will enable and start the System Restore Service (SRService)" -ForegroundColor Yellow
+        Write-Host "Required for automatic restore point creation" -ForegroundColor Gray
+        Write-Host ""
+        
+        # Check current service status
+        Write-Host "Checking System Restore Service status..." -ForegroundColor Yellow
+        $service = Get-Service -Name "SRService" -ErrorAction SilentlyContinue
+        
+        if (-not $service) {
+            Write-Host "[FAIL] System Restore Service (SRService) not found!" -ForegroundColor Red
+            Write-Host "This service should exist on Windows systems. Try running System File Checker:" -ForegroundColor Yellow
+            Write-Host "   sfc /scannow" -ForegroundColor White
+            return
+        }
+        
+        Write-Host "Current Status: $($service.Status) (Startup Type: $($service.StartType))" -ForegroundColor Cyan
+        
+        # Enable service if disabled
+        if ($service.StartType -eq "Disabled") {
+            Write-Host "Enabling System Restore Service..." -ForegroundColor Yellow
+            try {
+                Set-Service -Name "SRService" -StartupType Automatic -ErrorAction Stop
+                Write-Host "[OK] Service startup type set to Automatic" -ForegroundColor Green
+            } catch {
+                Write-Host "[FAIL] Could not enable service: $($_.Exception.Message)" -ForegroundColor Red
+                Write-Host "Try running as administrator or manually via services.msc" -ForegroundColor Yellow
+                return
+            }
+        }
+        
+        # Start service if not running
+        if ($service.Status -ne "Running") {
+            Write-Host "Starting System Restore Service..." -ForegroundColor Yellow
+            try {
+                Start-Service -Name "SRService" -ErrorAction Stop
+                Write-Host "[OK] System Restore Service started successfully" -ForegroundColor Green
+            } catch {
+                Write-Host "[FAIL] Could not start service: $($_.Exception.Message)" -ForegroundColor Red
+                Write-Host "Try manually starting via services.msc" -ForegroundColor Yellow
+                return
+            }
+        } else {
+            Write-Host "[OK] System Restore Service is already running" -ForegroundColor Green
+        }
+        
+        # Verify service is working
+        Start-Sleep -Seconds 2
+        $service = Get-Service -Name "SRService"
+        if ($service.Status -eq "Running") {
+            Write-Host ""
+            Write-Host "[SUCCESS] System Restore Service is now enabled and running!" -ForegroundColor Green
+            Write-Host "You can now use WinUpdateRemover with automatic restore point creation." -ForegroundColor Cyan
+        } else {
+            Write-Host "[WARN] Service verification failed - may need manual intervention" -ForegroundColor Yellow
+        }
+        
+    } catch {
+        Write-Host "Error enabling System Restore Service: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "Try manual steps: services.msc → System Restore Service → Set to Automatic → Start" -ForegroundColor Yellow
+    }
+    
+    Write-Host ""
+    Write-Host "Press any key to continue..." -ForegroundColor Gray
+    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+}
+
 # Function for comprehensive diagnostics
 function Invoke-Diagnostic {
     try {
@@ -580,26 +669,101 @@ if (-not $NoRestorePoint) {
     
     try {
         $systemDrive = $env:SystemDrive
+        
+        # Check if System Restore service is running
+        $srService = Get-Service -Name "SRService" -ErrorAction SilentlyContinue
+        if ($srService -and $srService.Status -ne "Running") {
+            Write-Warning "System Restore service is not running (Status: $($srService.Status))"
+            
+            if ($srService.StartType -eq "Disabled") {
+                Write-Warning "System Restore service is disabled"
+                if (-not $Force) {
+                    $enableService = Read-Host "Would you like to enable and start the System Restore service? (y/n)"
+                    if ($enableService -eq 'y') {
+                        try {
+                            Set-Service -Name "SRService" -StartupType Automatic -ErrorAction Stop
+                            Start-Service -Name "SRService" -ErrorAction Stop
+                            Write-Host "System Restore service enabled and started" -ForegroundColor Green
+                            Start-Sleep -Seconds 5
+                        } catch {
+                            Write-Warning "Failed to enable System Restore service: $($_.Exception.Message)"
+                            Write-Host "You can manually enable it via: services.msc -> System Restore -> Set to Automatic" -ForegroundColor Yellow
+                        }
+                    }
+                }
+            } else {
+                # Service is not disabled, try to start it
+                try {
+                    Start-Service -Name "SRService" -ErrorAction Stop
+                    Write-Host "System Restore service started" -ForegroundColor Green
+                    Start-Sleep -Seconds 3
+                } catch {
+                    Write-Warning "Failed to start System Restore service: $($_.Exception.Message)"
+                }
+            }
+        } elseif (-not $srService) {
+            Write-Warning "System Restore service (SRService) not found on this system"
+        }
+        
+        # Check registry settings for System Restore
         $regPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore"
         $disableSR = Get-ItemProperty -Path $regPath -Name "DisableSR" -ErrorAction SilentlyContinue
         
         if ($disableSR -and $disableSR.DisableSR -eq 1) {
-            Write-Warning "System Restore appears to be disabled"
+            Write-Warning "System Restore is disabled in registry"
             if (-not $Force) {
-                $enable = Read-Host "Would you like to enable it? (y/n)"
+                $enable = Read-Host "Would you like to enable System Restore for $systemDrive? (y/n)"
                 if ($enable -eq 'y') {
-                    Enable-ComputerRestore -Drive $systemDrive -ErrorAction Stop
-                    Write-Host "System Restore enabled" -ForegroundColor Green
-                    Start-Sleep -Seconds 3
+                    try {
+                        Enable-ComputerRestore -Drive $systemDrive -ErrorAction Stop
+                        Write-Host "System Restore enabled for $systemDrive" -ForegroundColor Green
+                        Start-Sleep -Seconds 3
+                    } catch {
+                        Write-Warning "Failed to enable System Restore: $($_.Exception.Message)"
+                        Write-Host "You can manually enable it via: System Properties -> System Protection -> Configure" -ForegroundColor Yellow
+                    }
                 }
             }
         }
         
+        # Verify System Restore is available before attempting to create restore point
+        $protectionStatus = Get-ComputerRestorePoint | Select-Object -First 1 -ErrorAction SilentlyContinue
+        if (-not $protectionStatus) {
+            Write-Warning "No restore points found - System Restore may not be configured"
+            if (-not $Force) {
+                $configure = Read-Host "Would you like to configure System Restore now? (y/n)"
+                if ($configure -eq 'y') {
+                    try {
+                        Enable-ComputerRestore -Drive $systemDrive -ErrorAction Stop
+                        Write-Host "System Restore configured for $systemDrive" -ForegroundColor Green
+                        Start-Sleep -Seconds 3
+                    } catch {
+                        Write-Warning "Failed to configure System Restore: $($_.Exception.Message)"
+                    }
+                }
+            }
+        }
+        
+        # Attempt to create restore point
         Checkpoint-Computer -Description $rpName -RestorePointType "MODIFY_SETTINGS" -ErrorAction Stop
         Write-Host "Restore point created successfully!" -ForegroundColor Green
         $Script:rpCreated = $true
+        
     } catch {
         Write-Warning "Failed to create restore point: $($_.Exception.Message)"
+        
+        # Provide specific guidance based on common errors
+        if ($_.Exception.Message -like "*service*disabled*" -or $_.Exception.Message -like "*cannot be started*") {
+            Write-Host "`n--- System Restore Troubleshooting ---" -ForegroundColor Yellow
+            Write-Host "System Restore appears to be disabled or the service is not running:" -ForegroundColor White
+            Write-Host "1. Open Services (services.msc)" -ForegroundColor White
+            Write-Host "2. Find 'System Restore Service' (SRService)" -ForegroundColor White
+            Write-Host "3. Set Startup Type to 'Automatic'" -ForegroundColor White
+            Write-Host "4. Start the service" -ForegroundColor White
+            Write-Host "5. Or use: System Properties > System Protection > Configure" -ForegroundColor White
+            Write-Host "`nAlternative: Use -NoRestorePoint parameter to skip restore point creation" -ForegroundColor Cyan
+        }
+        
         if (-not $Force) {
             $continue = Read-Host "Continue without restore point? (y/n)"
             if ($continue -ne 'y') {

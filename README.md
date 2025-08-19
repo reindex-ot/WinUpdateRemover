@@ -22,6 +22,11 @@ Invoke-WebRequest -Uri "https://raw.githubusercontent.com/danalec/WinUpdateRemov
 .\WinUpdateRemover.ps1
 ```
 
+### System Restore Service Fix
+If restore point creation fails:
+- Run `WinUpdateRemover.ps1 -EnableSystemRestore` as Administrator
+- Or manually enable via Services (services.msc) → System Restore Service
+
 ### Built-in Diagnostic Tools
 - **Verification Mode**: Check if updates are actually installed before removal
 - **Quick Fix Mode**: Automated Windows Update repair and cache reset
@@ -50,6 +55,9 @@ Invoke-WebRequest -Uri "https://raw.githubusercontent.com/danalec/WinUpdateRemov
 
 # Comprehensive system diagnostics
 .\WinUpdateRemover.ps1 -Diagnostic
+
+# Enable System Restore service
+.\WinUpdateRemover.ps1 -EnableSystemRestore
 ```
 
 ### Batch Processing
@@ -83,6 +91,11 @@ dism /online /get-packages | findstr "KB5063878"
 **Cause:** System Restore disabled
 **Fix:**
 ```powershell
+# Enable System Restore service
+Set-Service -Name SRService -StartupType Automatic
+Start-Service -Name SRService
+
+# Enable System Restore on system drive
 Enable-ComputerRestore -Drive $env:SystemDrive
 Start-Service -Name VSS
 ```
@@ -191,3 +204,25 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 .\WinUpdateRemover.ps1 -Diagnostic                     # Full system check
 .\WinUpdateRemover.ps1 -KBNumbers "KB5063878" -Force   # Remove if still needed
 ```
+
+## Version History
+
+### v1.0.4 (Current)
+- **Integrated EnableSystemRestore** functionality as new parameter
+- **Improved System Restore handling** - Better detection and repair of disabled SRService
+- **Enhanced troubleshooting** - Specific guidance for restore point failures
+- **Better error messages** - Clearer guidance when System Restore is unavailable
+- Enhanced error handling for 0x800f0805
+- Added comprehensive diagnostic mode
+- Improved KB verification
+- Added quick fix mode
+- Enhanced logging and troubleshooting
+
+### v1.0.2
+- Added comprehensive diagnostics
+- Enhanced verification mode
+
+### v1.0.1
+- Initial release with basic update removal
+- Restore point protection
+- Interactive mode
