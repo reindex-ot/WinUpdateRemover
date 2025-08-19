@@ -34,7 +34,7 @@
 
 .NOTES
     Author: @danalec
-    Version: 1.0.16
+    Version: 1.0.17
     Requires: Administrator privileges
     
     Troubleshooting System Restore Issues:
@@ -92,7 +92,7 @@ param(
 )
 
 $Script:ScriptName = "WinUpdateRemover"
-$Script:Version = "v1.0.16"
+$Script:Version = "v1.0.17"
 $ErrorActionPreference = "Stop"
 
 # Enhanced DISM Functions for Advanced Package Management
@@ -295,10 +295,8 @@ $problematicKBs = @(
 )
 
 # Scan for installed updates
-Write-Host "Scanning for installed updates..." -ForegroundColor Yellow
 try {
     $installedUpdates = Get-HotFix | Where-Object { $_.HotFixID -match 'KB\d+' } | Sort-Object {[DateTime]$_.InstalledOn} -Descending
-    Write-Host "Found $($installedUpdates.Count) installed updates." -ForegroundColor Green
 } catch {
     Write-Host "Error scanning for updates: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
@@ -313,7 +311,130 @@ function Get-NormalizedKBNumber {
     return $null
 }
 
-# Function to verify if a specific KB is installed (from VerifyKB5063878.ps1)
+# Function to get comprehensive list of all installed updates
+function Get-AllInstalledUpdates {
+    $allUpdates = @()
+    $processedKBs = @{}
+    
+    # Scan Get-HotFix first (most reliable for removable updates)
+    Write-Host "Scanning Get-HotFix..." -ForegroundColor Gray
+    try {
+        $hotfixes = Get-HotFix | Where-Object { $_.HotFixID -match 'KB\d+' } | Sort-Object {[DateTime]$_.InstalledOn} -Descending
+        foreach ($hotfix in $hotfixes) {
+            $kbNumber = $hotfix.HotFixID
+            if (-not $processedKBs.ContainsKey($kbNumber)) {
+                $allUpdates += [PSCustomObject]@{
+                    KB = $kbNumber
+                    Description = $hotfix.Description
+                    InstallDate = $hotfix.InstalledOn
+                    Source = "Get-HotFix"
+                    Notes = "Removable via WUSA/DISM"
+                    Removable = $true
+                }
+                $processedKBs[$kbNumber] = $true
+            }
+        }
+    } catch {
+        Write-Host "Error scanning Get-HotFix: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+    
+    Write-Host "Scanning DISM packages..." -ForegroundColor Gray
+    try {
+        $dismOutput = & dism /online /get-packages 2>$null
+        if ($dismOutput) {
+            $packageLines = $dismOutput -join "`n" -split "Package Identity :"
+            foreach ($package in $packageLines) {
+                if ($package -match "KB(\d+)") {
+                    $kbNumber = "KB$($matches[1])"
+                    if (-not $processedKBs.ContainsKey($kbNumber)) {
+                        # Extract package name and state
+                        $packageName = ($package -split "`n" | Where-Object { $_ -match "Package_" } | Select-Object -First 1).Trim()
+                        $state = ($package -split "`n" | Where-Object { $_ -match "State :" } | Select-Object -First 1) -replace "State :", "" | ForEach-Object { $_.Trim() }
+                        
+                        if ($state -eq "Installed") {
+                            # Test DISM package removability using actual DISM test
+                            $isRemovable = $false
+                            $removabilityNotes = "Component Package"
+                            
+                            try {
+                                # Test actual removability using DISM
+                                $testResult = Test-DISMPackage -KBNumber $kbNumber
+                                $isRemovable = $testResult.Removable
+                                $removabilityNotes = if ($isRemovable) { "[DISM] Removable" } else { "[DISM] Permanent" }
+                                
+                                # Get additional package details
+                                $installTime = ($package -split "`n" | Where-Object { $_ -match "Install Time :" } | Select-Object -First 1) -replace "Install Time :", "" | ForEach-Object { $_.Trim() }
+                                
+                                # Parse install date from install time if available
+                                $installDate = $null
+                                if ($installTime -match "(\d{1,2}/\d{1,2}/\d{4})") {
+                                    $installDate = [DateTime]::Parse($matches[1])
+                                }
+                                
+                            } catch {
+                                # Fallback to heuristic if test fails
+                                $packageDetails = ($package -split "`n" | Where-Object { $_ -match "Release Type :" } | Select-Object -First 1) -replace "Release Type :", "" | ForEach-Object { $_.Trim() }
+                                
+                                # Most DISM packages are removable unless they're permanent system components
+                                if ($packageDetails -notmatch "Permanent|OnDemand" -and $packageName -notmatch "LanguagePack|FeatureOnDemand") {
+                                    $isRemovable = $true
+                                    $removabilityNotes = "[DISM] Removable"
+                                } else {
+                                    $isRemovable = $false
+                                    $removabilityNotes = "[DISM] Permanent"
+                                }
+                            }
+                            
+                            $allUpdates += [PSCustomObject]@{
+                                KB = $kbNumber
+                                Description = if ($packageName) { $packageName } else { "DISM Package" }
+                                InstallDate = $installDate
+                                Source = "DISM"
+                                Notes = $removabilityNotes
+                                Removable = $isRemovable
+                            }
+                            $processedKBs[$kbNumber] = $true
+                        }
+                    }
+                }
+            }
+        }
+    } catch {
+        Write-Host "Error scanning DISM: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+    
+    Write-Host "Scanning Windows Update API..." -ForegroundColor Gray
+    try {
+        $session = New-Object -ComObject "Microsoft.Update.Session"
+        $searcher = $session.CreateUpdateSearcher()
+        $updates = $searcher.Search("IsInstalled=1 and Type='Software'")
+        
+        foreach ($update in $updates.Updates) {
+            if ($update.KBArticleIDs.Count -gt 0) {
+                foreach ($kbId in $update.KBArticleIDs) {
+                    $kbNumber = "KB$kbId"
+                    if (-not $processedKBs.ContainsKey($kbNumber)) {
+                        $allUpdates += [PSCustomObject]@{
+                            KB = $kbNumber
+                            Description = $update.Title
+                            InstallDate = $update.LastDeploymentChangeTime
+                            Source = "Windows Update API"
+                            Notes = "Informational only"
+                            Removable = $false
+                        }
+                        $processedKBs[$kbNumber] = $true
+                    }
+                }
+            }
+        }
+    } catch {
+        Write-Host "Error scanning Windows Update API: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+    
+    return $allUpdates
+}
+
+
 function Verify-KB {
     param([string]$KBNumber)
     
@@ -799,6 +920,28 @@ function Test-KBRemovability {
     $reason = "Standard update - maybe removable via WUSA"
     $removability = "Potentially Removable"  # Default to potentially removable
     
+    # First, check if this is a DISM package
+    try {
+        $dismOutput = & dism /online /get-packages 2>$null | Where-Object { $_ -match $kb -and $_ -match "Package" }
+        if ($dismOutput) {
+            # This is a DISM package, test actual removability
+            $testResult = Test-DISMPackage -KBNumber $kb
+            if ($testResult.Removable) {
+                $removability = "Removable"
+                $reason = "DISM package - removable via DISM"
+            } else {
+                $removability = "Not Removable"
+                $reason = "DISM package - permanent system component"
+            }
+            return [PSCustomObject]@{
+                Removability = $removability
+                Reason = $reason
+            }
+        }
+    } catch {
+        # Continue with other checks if DISM test fails
+    }
+    
     # Quick checks for non-removable updates
     if ($kb -in $combinedSSUUpdates) {
         $isRemovable = $false
@@ -818,12 +961,19 @@ function Test-KBRemovability {
     
     # For standard updates, check if they're likely to be fully removable
     if ($isRemovable) {
-        # Only mark very recent security updates as definitively removable
-        if ($kb -match '^KB51[0-9]{5}$' -or $kb -match '^KB52[0-9]{5}$') {
+        # Check if it's actually a Get-HotFix update
+        $hotfix = Get-HotFix -Id $kb -ErrorAction SilentlyContinue
+        if ($hotfix) {
             $removability = "Removable"
-            $reason = "Very recent security update - typically removable"
+            $reason = "Standard update - removable via WUSA"
+        } else {
+            # Only mark very recent security updates as definitively removable
+            if ($kb -match '^KB51[0-9]{5}$' -or $kb -match '^KB52[0-9]{5}$') {
+                $removability = "Removable"
+                $reason = "Very recent security update - typically removable"
+            }
+            # KB50xxxx series and others remain as "Potentially Removable" (default)
         }
-        # KB50xxxx series and others remain as "Potentially Removable" (default)
     }
     
     return [PSCustomObject]@{
@@ -1209,7 +1359,7 @@ function Validate-KBInput {
     return $true
 }
 
-# Function to perform repair Windows Update (from QuickFix.bat)
+# Function to perform repair Windows Update
 function Invoke-QuickFix {
     Write-Host "=== Repair Windows Update ===" -ForegroundColor Cyan
     Write-Host "Running comprehensive Windows Update repair..." -ForegroundColor Yellow
@@ -1736,10 +1886,71 @@ if ($KBNumbers) {
         Write-Warning 'None of the specified KB numbers were found installed.'
         exit 0
     }
-} elseif ($ListOnly) {
-    Write-Host "List-only mode: displaying updates without removal option" -ForegroundColor Cyan
-    exit 0
-} elseif ($CheckBlockStatus -or $a) {
+}
+
+# Handle ListOnly parameter - display comprehensive listing
+if ($ListOnly) {
+    Write-Host "=== Comprehensive Update Listing ===" -ForegroundColor Cyan
+    Write-Host "Scanning all update sources..." -ForegroundColor Yellow
+    Write-Host ""
+    
+    # Get comprehensive update list
+    $allUpdates = Get-AllInstalledUpdates
+    
+    if ($allUpdates.Count -eq 0) {
+        Write-Host "No updates found." -ForegroundColor Yellow
+        Read-Host "Press Enter to exit"
+        exit 0
+    } else {
+        Write-Host "Found $($allUpdates.Count) installed updates:" -ForegroundColor Green
+        Write-Host ""
+        
+        # Group by source for better organization
+        $groupedUpdates = $allUpdates | Group-Object Source
+        
+        foreach ($group in $groupedUpdates) {
+            Write-Host "--- $($group.Name) Updates ---" -ForegroundColor Cyan
+            
+            foreach ($update in $group.Group | Sort-Object InstallDate -Descending) {
+                $installDate = if ($update.InstallDate) { $update.InstallDate.ToString("yyyy-MM-dd") } else { "Unknown" }
+                
+                # Determine removability indicator based on source and Removable property
+                $removabilityIndicator = ""
+                $textColor = "White"
+                
+                if ($update.Source -eq "Get-HotFix") {
+                    $removabilityIndicator = "[Get-HotFix] Removable"
+                    $textColor = "White"
+                } elseif ($update.Source -eq "DISM") {
+                    if ($update.Removable) {
+                        $removabilityIndicator = "[DISM] Removable"
+                        $textColor = "White"
+                    } else {
+                        $removabilityIndicator = "[DISM] Permanent"
+                        $textColor = "Gray"
+                    }
+                } else {
+                    $removabilityIndicator = "[Info Only]"
+                    $textColor = "Gray"
+                }
+                
+                Write-Host "$($update.KB) - $($update.Description) [$installDate] $removabilityIndicator" -ForegroundColor $textColor
+                if ($update.Notes) {
+                    Write-Host "    Note: $($update.Notes)" -ForegroundColor Gray
+                }
+            }
+            Write-Host ""
+        }
+        
+        Write-Host "Note: Updates marked as 'Removable' can be removed using this tool (Get-HotFix and DISM sources)." -ForegroundColor Yellow
+        Write-Host "Continuing to interactive menu for removal options..." -ForegroundColor Green
+        Write-Host ""
+        
+        Read-Host "Press Enter to continue to interactive menu"
+    }
+}
+
+if ($CheckBlockStatus -or $a) {
     # Handle CheckBlockStatus parameter
     Write-Host "Checking blocking status of updates..." -ForegroundColor Yellow
     Write-Host ""
@@ -1761,7 +1972,9 @@ if ($KBNumbers) {
         Write-Host "Or use: -CheckBlockStatus \"KB1234567\" (for specific KB)" -ForegroundColor Cyan
     }
     exit 0
-} elseif ($BlockUpdate) {
+}
+
+if ($BlockUpdate) {
     # Handle BlockUpdate parameter
     if ($KBNumbers) {
         Write-Host "Blocking specified updates..." -ForegroundColor Yellow
@@ -1780,7 +1993,9 @@ if ($KBNumbers) {
         Write-Host "Or use: -BlockUpdate -KBNumbers \"KB1234567\",\"KB2345678\"" -ForegroundColor Cyan
     }
     exit 0
-} elseif ($UnblockUpdate) {
+}
+
+if ($UnblockUpdate) {
     # Handle UnblockUpdate parameter
     if ($KBNumbers) {
         Write-Host "Unblocking specified updates..." -ForegroundColor Yellow
@@ -1799,7 +2014,10 @@ if ($KBNumbers) {
         Write-Host "Or use: -UnblockUpdate -KBNumbers \"KB1234567\",\"KB2345678\"" -ForegroundColor Cyan
     }
     exit 0
-} else {
+}
+
+# Interactive menu - run if no other parameters were specified, or if ListOnly was used
+if (-not ($KBNumbers -or $CheckBlockStatus -or $a -or $BlockUpdate -or $UnblockUpdate) -or $ListOnly) {
         # Interactive menu - loop until user exits
         do {
             Clear-Host
@@ -1831,13 +2049,71 @@ if ($KBNumbers) {
             
             switch ($menuChoice) {
                 "1" {
-            # Original update removal functionality
+            # Enhanced update listing and removal functionality
             Write-Host ""
-            Write-Host "Scanning for installed updates..." -ForegroundColor Yellow
+            Write-Host "=== Comprehensive Update Listing ===" -ForegroundColor Cyan
+            Write-Host "Scanning all update sources..." -ForegroundColor Yellow
+            Write-Host ""
             
             try {
-                $installedUpdates = Get-HotFix | Where-Object { $_.HotFixID -match 'KB\d+' } | Sort-Object {[DateTime]$_.InstalledOn} -Descending
-                Write-Host "Found $($installedUpdates.Count) installed updates." -ForegroundColor Green
+                # Get comprehensive update list
+                $allUpdates = Get-AllInstalledUpdates
+                
+                # Build list of removable updates (Get-HotFix and DISM removable)
+                $installedUpdates = @()
+                $removableUpdates = @()
+                
+                foreach ($update in $allUpdates) {
+                    if ($update.Source -eq "Get-HotFix") {
+                        # Use original HotFix object for removal compatibility
+                        $hotfixUpdate = Get-HotFix -Id $update.KB -ErrorAction SilentlyContinue
+                        if ($hotfixUpdate) {
+                            $installedUpdates += $hotfixUpdate
+                            $removableUpdates += $update
+                        }
+                    } elseif ($update.Source -eq "DISM" -and $update.Removable) {
+                        # Create HotFix-like object for DISM removable updates
+                        $dismUpdate = [PSCustomObject]@{
+                            HotFixID = $update.KB
+                            Description = $update.Description
+                            InstalledOn = $update.InstallDate
+                            Source = "DISM"
+                        }
+                        $installedUpdates += $dismUpdate
+                        $removableUpdates += $update
+                    }
+                }
+                
+                Write-Host "Found $($allUpdates.Count) total installed updates ($($installedUpdates.Count) removable via this tool)." -ForegroundColor Green
+                Write-Host ""
+                
+                # Display comprehensive list grouped by source
+                $groupedUpdates = $allUpdates | Group-Object Source
+                foreach ($group in $groupedUpdates) {
+                    Write-Host "--- $($group.Name) Updates ---" -ForegroundColor Cyan
+                    foreach ($update in $group.Group | Sort-Object InstallDate -Descending) {
+                        $installDate = if ($update.InstallDate) { $update.InstallDate.ToString("yyyy-MM-dd") } else { "Unknown" }
+                        
+                        # Use pre-formatted removability indicators from Notes
+                        $removabilityIndicator = $update.Notes
+                        $textColor = "White"
+                        
+                        # Determine text color based on removability
+                        if ($removabilityIndicator -like "*DISM*Removable*" -or $removabilityIndicator -like "*Get-HotFix*Removable*") {
+                            $textColor = "White"
+                        } elseif ($removabilityIndicator -like "*DISM*Permanent*" -or $removabilityIndicator -like "*Info Only*") {
+                            $textColor = "Gray"
+                        } else {
+                            $textColor = "White"
+                        }
+                        
+                        Write-Host "$($update.KB) - $($update.Description) [$installDate] $removabilityIndicator" -ForegroundColor $textColor
+                    }
+                    Write-Host ""
+                }
+                
+                Write-Host "Note: Updates marked as 'Removable' can be removed using this tool (Get-HotFix and DISM sources)." -ForegroundColor Yellow
+                Write-Host "Other updates are shown for informational purposes only." -ForegroundColor Yellow
                 Write-Host ""
                 
                 if ($installedUpdates.Count -eq 0) {
