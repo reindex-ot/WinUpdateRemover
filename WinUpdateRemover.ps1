@@ -34,7 +34,7 @@
 
 .NOTES
     Author: @danalec
-    Version: 1.0.7
+   # Version: 1.0.8
     Requires: Administrator privileges
     
     Troubleshooting System Restore Issues:
@@ -89,7 +89,7 @@ param(
 )
 
 $Script:ScriptName = "WinUpdateRemover"
-$Script:Version = "v1.0.7"
+$Script:Version = "v1.0.8"
 $ErrorActionPreference = "Stop"
 
 # Check for administrator privileges
@@ -1220,9 +1220,11 @@ foreach ($update in $updatesToProcess) {
                     $removeSuccess = $true
                     $removalMethods += "DISM (auto-detected package)"
                 } else {
-                    $errorDetails += "DISM auto-detect exit code: $($process.ExitCode)"
-                    if ($process.ExitCode -eq 0x800f0805) {
-                        Write-Host "Error 0x800f0805: Package not found or corrupted" -ForegroundColor Red
+                    # Handle specific DISM error codes
+                    if ($process.ExitCode -eq -2146498555) {
+                        $errorDetails += "DISM error: Package not found in component store (0x800f0805)"
+                    } else {
+                        $errorDetails += "DISM auto-detect exit code: $($process.ExitCode)"
                     }
                 }
             } else {
@@ -1243,7 +1245,12 @@ foreach ($update in $updatesToProcess) {
                 $removeSuccess = $true
                 $removalMethods += "DISM (standard format)"
             } else {
-                $errorDetails += "DISM standard format exit code: $($process.ExitCode)"
+                # Handle specific DISM error codes
+                if ($process.ExitCode -eq -2146498555) {
+                    $errorDetails += "DISM error: Package not found in component store (0x800f0805)"
+                } else {
+                    $errorDetails += "DISM standard format exit code: $($process.ExitCode)"
+                }
             }
         }
         
