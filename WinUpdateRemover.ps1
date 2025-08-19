@@ -34,7 +34,7 @@
 
 .NOTES
     Author: @danalec
-   # Version: 1.0.8
+   # Version: 1.0.9
     Requires: Administrator privileges
     
     Troubleshooting System Restore Issues:
@@ -89,7 +89,7 @@ param(
 )
 
 $Script:ScriptName = "WinUpdateRemover"
-$Script:Version = "v1.0.8"
+$Script:Version = "v1.0.9"
 $ErrorActionPreference = "Stop"
 
 # Check for administrator privileges
@@ -1209,48 +1209,86 @@ foreach ($update in $updatesToProcess) {
         
         # Method 1: Try to find actual package name using DISM
         Write-Host "Searching for package information..." -ForegroundColor Gray
-        $packageInfo = dism /online /get-packages | findstr /i "kb$kb"
-        if ($packageInfo) {
-            $packageName = ($packageInfo -split '\s+')[-1]
-            if ($packageName -match "Package_for_KB$kb") {
-                Write-Host "Found package: $packageName" -ForegroundColor Green
-                $dismArgs = "/Online /Remove-Package /PackageName:$packageName /quiet /norestart"
+        try {
+            $dismOutput = & dism /online /get-packages 2>$null
+            $packageLines = $dismOutput | Where-Object { $_ -match "kb$kb" -and $_ -match "Package_for_KB" }
+            
+            if ($packageLines) {
+                foreach ($line in $packageLines) {
+                    # Extract package name from different possible formats
+                    if ($line -match "Package Name : (.+)$") {
+                        $packageName = $matches[1].Trim()
+                    } elseif ($line -match "(Package_for_KB\d+[^\s]+)") {
+                        $packageName = $matches[1].Trim()
+                    } else {
+                        # Try to extract the last part after splitting by spaces
+                        $parts = $line -split '\s+'
+                        $packageName = ($parts | Where-Object { $_ -match "Package_for_KB$kb" })[-1]
+                    }
+                    
+                    if ($packageName -and $packageName -match "Package_for_KB$kb") {
+                        Write-Host "Found package: $packageName" -ForegroundColor Green
+                        $dismArgs = "/Online /Remove-Package /PackageName:$packageName /quiet /norestart"
+                        $process = Start-Process -FilePath "dism.exe" -ArgumentList $dismArgs -Wait -PassThru -NoNewWindow
+                        if ($process.ExitCode -eq 0 -or $process.ExitCode -eq 3010) {
+                            $removeSuccess = $true
+                            $removalMethods += "DISM (auto-detected: $packageName)"
+                            break
+                        } else {
+                            # Handle specific DISM error codes
+                            if ($process.ExitCode -eq -2146498555) {
+                                $errorDetails += "DISM error: Package not found in component store (0x800f0805)"
+                            } else {
+                                $errorDetails += "DISM auto-detect exit code: $($process.ExitCode) for $packageName"
+                            }
+                        }
+                    }
+                }
+                
+                if (-not $removeSuccess) {
+                    Write-Host "Package(s) found but removal failed" -ForegroundColor Yellow
+                }
+            } else {
+                Write-Host "No package found with KB$kb in DISM" -ForegroundColor Yellow
+                $errorDetails += "Package not found in DISM"
+            }
+        } catch {
+            Write-Host "Error querying DISM packages: $($_.Exception.Message)" -ForegroundColor Red
+            $errorDetails += "DISM query error: $($_.Exception.Message)"
+        }
+        
+        # Method 2: Try multiple DISM package name formats
+        if (-not $removeSuccess) {
+            Write-Host "Trying multiple DISM package formats..." -ForegroundColor Gray
+            
+            # Get system architecture
+            $arch = if ([Environment]::Is64BitOperatingSystem) { "amd64" } else { "x86" }
+            
+            # Try different package naming patterns
+            $packageFormats = @(
+                "Package_for_KB$kb~31bf3856ad364e35~$arch~~",
+                "Package_for_KB$kb~31bf3856ad364e35~$arch~en~",
+                "Package_for_KB$kb~31bf3856ad364e35~$arch~~6.1.1.0",
+                "Package_for_KB$kb~31bf3856ad364e35~$arch~~6.2.1.1",
+                "Package_for_KB$kb~31bf3856ad364e35~$arch~~6.3.1.0",
+                "Package_for_KB$kb~31bf3856ad364e35~$arch~~10.0.1.0"
+            )
+            
+            foreach ($packageFormat in $packageFormats) {
+                $dismArgs = "/Online /Remove-Package /PackageName:$packageFormat /quiet /norestart"
                 $process = Start-Process -FilePath "dism.exe" -ArgumentList $dismArgs -Wait -PassThru -NoNewWindow
                 if ($process.ExitCode -eq 0 -or $process.ExitCode -eq 3010) {
                     $removeSuccess = $true
-                    $removalMethods += "DISM (auto-detected package)"
-                } else {
-                    # Handle specific DISM error codes
-                    if ($process.ExitCode -eq -2146498555) {
-                        $errorDetails += "DISM error: Package not found in component store (0x800f0805)"
-                    } else {
-                        $errorDetails += "DISM auto-detect exit code: $($process.ExitCode)"
-                    }
+                    $removalMethods += "DISM (format: $packageFormat)"
+                    break
+                } elseif ($process.ExitCode -ne -2146498555) {
+                    # If it's not "package not found", it might be a different error worth noting
+                    $errorDetails += "DISM format $packageFormat exit code: $($process.ExitCode)"
                 }
-            } else {
-                Write-Host "Package found but format doesn't match expected pattern" -ForegroundColor Yellow
-                $errorDetails += "Package format mismatch"
             }
-        } else {
-            Write-Host "No package found with KB$kb in DISM" -ForegroundColor Yellow
-            $errorDetails += "Package not found in DISM"
-        }
-        
-        # Method 2: Try standard DISM package name format
-        if (-not $removeSuccess) {
-            Write-Host "Trying standard DISM package format..." -ForegroundColor Gray
-            $dismArgs = "/Online /Remove-Package /PackageName:Package_for_KB$kb~31bf3856ad364e35~amd64~~ /quiet /norestart"
-            $process = Start-Process -FilePath "dism.exe" -ArgumentList $dismArgs -Wait -PassThru -NoNewWindow
-            if ($process.ExitCode -eq 0 -or $process.ExitCode -eq 3010) {
-                $removeSuccess = $true
-                $removalMethods += "DISM (standard format)"
-            } else {
-                # Handle specific DISM error codes
-                if ($process.ExitCode -eq -2146498555) {
-                    $errorDetails += "DISM error: Package not found in component store (0x800f0805)"
-                } else {
-                    $errorDetails += "DISM standard format exit code: $($process.ExitCode)"
-                }
+            
+            if (-not $removeSuccess) {
+                $errorDetails += "DISM error: Package not found with any standard naming format"
             }
         }
         
