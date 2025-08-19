@@ -10,13 +10,17 @@
     - Targeted Removal: Remove specific problematic updates
     - Update Blocking: Prevent specific updates from being installed via registry-based blocking
     - Enhanced Error Handling: Improved handling for 0x800f0805 and other common errors
-    - Multi-Method Removal: Four different removal approaches (DISM auto-detect, DISM standard, WUSA, Windows Update API)
+    - Multi-Method Removal: Enhanced removal approaches including PSWindowsUpdate module support
     - Smart Detection: Automatically checks if updates are installed before attempting removal
     - Interactive Mode: Step-by-step guidance with confirmation prompts
     - Verification Mode: Check if specific KB updates are actually installed
     - Repair Windows Update Mode: Automated Windows Update repair and cache reset
     - Diagnostic Mode: Comprehensive Windows Update system analysis
     - Block Status Checking: Verify if updates are currently blocked
+    - PSWindowsUpdate Integration: Optional PowerShell module support for enhanced reliability
+    - Date-Based Removal: Remove updates installed within specific date ranges
+    - Remote Computer Support: Process updates on remote computers via PowerShell remoting
+    - Update Hiding: Hide updates from Windows Update to prevent reinstallation
     
     Usage Examples:
     - Interactive: .\WinUpdateRemover.ps1
@@ -31,10 +35,14 @@
     - Block Update: .\WinUpdateRemover.ps1 -BlockUpdate -KBNumbers "KB5055523"
     - Unblock Update: .\WinUpdateRemover.ps1 -UnblockUpdate -KBNumbers "KB5055523"
     - Check Block Status: .\WinUpdateRemover.ps1 -CheckBlockStatus -KBNumbers "KB5055523"
+    - Use PSWindowsUpdate: .\WinUpdateRemover.ps1 -KBNumbers "KB5055523" -UsePSWindowsUpdate
+    - Hide Update: .\WinUpdateRemover.ps1 -KBNumbers "KB5055523" -HideUpdate
+    - Date Range: .\WinUpdateRemover.ps1 -DateRange "2024-01-01:2024-12-31"
+    - Remote Computer: .\WinUpdateRemover.ps1 -KBNumbers "KB5055523" -RemoteComputer "SERVER01"
 
 .NOTES
     Author: @danalec
-    Version: 1.0.17
+    Version: 1.0.18
     Requires: Administrator privileges
     
     Troubleshooting System Restore Issues:
@@ -88,11 +96,23 @@ param(
     [string]$CheckBlockStatus,
     
     [Parameter(Mandatory=$false)]
+    [switch]$UsePSWindowsUpdate,
+    
+    [Parameter(Mandatory=$false)]
+    [switch]$HideUpdate,
+    
+    [Parameter(Mandatory=$false)]
+    [string]$DateRange,
+    
+    [Parameter(Mandatory=$false)]
+    [string]$RemoteComputer,
+    
+    [Parameter(Mandatory=$false)]
     [switch]$a
 )
 
 $Script:ScriptName = "WinUpdateRemover"
-$Script:Version = "v1.0.17"
+$Script:Version = "v1.0.18"
 $ErrorActionPreference = "Stop"
 
 # Enhanced DISM Functions for Advanced Package Management
@@ -216,6 +236,209 @@ function Remove-DISMPackage {
         ExitCode = $exitCode
         Message = $errorMessage
         PackageName = $PackageName
+    }
+}
+
+# Enhanced WUSA error handling for Windows 10 1507+
+function Test-WUSAQuietMode {
+    $osVersion = [System.Environment]::OSVersion.Version
+    return ($osVersion.Major -ge 10 -and $osVersion.Build -ge 10240)
+}
+
+# PSWindowsUpdate module support functions
+function Test-PSWindowsUpdateModule {
+    try {
+        $module = Get-Module -ListAvailable -Name PSWindowsUpdate
+        if ($module) {
+            Import-Module PSWindowsUpdate -Force -ErrorAction SilentlyContinue
+            return $true
+        }
+        return $false
+    } catch {
+        return $false
+    }
+}
+
+function Install-PSWindowsUpdateModule {
+    Write-Host "Installing PSWindowsUpdate module..." -ForegroundColor Yellow
+    try {
+        Install-Module -Name PSWindowsUpdate -Force -Scope CurrentUser -AllowClobber
+        Import-Module PSWindowsUpdate -Force
+        Write-Host "PSWindowsUpdate module installed successfully!" -ForegroundColor Green
+        return $true
+    } catch {
+        Write-Host "Failed to install PSWindowsUpdate module: $($_.Exception.Message)" -ForegroundColor Red
+        return $false
+    }
+}
+
+function Remove-UpdateWithPSWindowsUpdate {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$KBNumber,
+        
+        [Parameter(Mandatory=$false)]
+        [switch]$HideUpdate,
+        
+        [Parameter(Mandatory=$false)]
+        [string]$ComputerName
+    )
+    
+    $params = @{
+        KBArticleID = $KBNumber
+        AcceptAll = $true
+        AutoReboot = $false
+    }
+    
+    if ($ComputerName) {
+        $params.ComputerName = $ComputerName
+    }
+    
+    try {
+        if ($HideUpdate) {
+            Hide-WindowsUpdate @params
+            Write-Host "Update $KBNumber hidden from Windows Update" -ForegroundColor Green
+        } else {
+            Remove-WindowsUpdate @params
+            Write-Host "Update $KBNumber removed successfully via PSWindowsUpdate" -ForegroundColor Green
+        }
+        return $true
+    } catch {
+        Write-Host "PSWindowsUpdate failed: $($_.Exception.Message)" -ForegroundColor Yellow
+        return $false
+    }
+}
+
+# Date-based removal function
+function Remove-UpdatesByDateRange {
+    param(
+        [Parameter(Mandatory=$true)]
+        [datetime]$StartDate,
+        [Parameter(Mandatory=$false)]
+        [datetime]$EndDate = (Get-Date),
+        [Parameter(Mandatory=$false)]
+        [switch]$WhatIf
+    )
+    
+    Write-Host "Searching for updates installed between $StartDate and $EndDate..." -ForegroundColor Cyan
+    
+    try {
+        $updates = Get-CimInstance -ClassName Win32_QuickFixEngineering | 
+                   Where-Object { 
+                       $_.InstalledOn -and 
+                       ([datetime]$_.InstalledOn -ge $StartDate) -and 
+                       ([datetime]$_.InstalledOn -le $EndDate)
+                   }
+        
+        if ($updates.Count -eq 0) {
+            Write-Host "No updates found in the specified date range." -ForegroundColor Yellow
+            return $false
+        }
+        
+        Write-Host "Found $($updates.Count) updates to remove:" -ForegroundColor Green
+        $updates | Format-Table HotFixID, Description, InstalledOn -AutoSize
+        
+        if ($WhatIf) {
+            Write-Host "WhatIf: Would remove the above updates" -ForegroundColor Cyan
+            return $true
+        }
+        
+        $results = @()
+        foreach ($update in $updates) {
+            $kbNumber = $update.HotFixID -replace "KB", ""
+            $result = Remove-WindowsUpdate -KBArticleID $kbNumber -AcceptAll -AutoReboot:$false
+            $results += $result
+        }
+        
+        return $results
+    } catch {
+        Write-Host "Date-based removal failed: $($_.Exception.Message)" -ForegroundColor Red
+        return $false
+    }
+}
+
+# Remote computer support
+function Invoke-RemoteUpdateRemoval {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$ComputerName,
+        [Parameter(Mandatory=$true)]
+        [string]$KBNumber,
+        [Parameter(Mandatory=$false)]
+        [PSCredential]$Credential
+    )
+    
+    try {
+        $sessionParams = @{
+            ComputerName = $ComputerName
+            ScriptBlock = {
+                param($KB)
+                try {
+                    Remove-WindowsUpdate -KBArticleID $KB -AcceptAll -AutoReboot:$false
+                    return @{Success = $true; Message = "Update $KB removed successfully"}
+                } catch {
+                    return @{Success = $false; Message = $_.Exception.Message}
+                }
+            }
+            ArgumentList = $KBNumber
+            ErrorAction = "Stop"
+        }
+        
+        if ($Credential) {
+            $sessionParams.Credential = $Credential
+        }
+        
+        $result = Invoke-Command @sessionParams
+        return $result
+    } catch {
+        Write-Host "Remote removal failed: $($_.Exception.Message)" -ForegroundColor Red
+        return @{Success = $false; Message = $_.Exception.Message}
+    }
+}
+
+# Enhanced WUSA error handling
+function Remove-UpdateWithWUSA {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$KBNumber,
+        [Parameter(Mandatory=$false)]
+        [switch]$Quiet
+    )
+    
+    $cleanKB = $KBNumber -replace "^KB", ""
+    $wusaArgs = "/uninstall", "/kb:$cleanKB", "/norestart"
+    
+    # Check if quiet mode is supported
+    if ($Quiet -and (Test-WUSAQuietMode)) {
+        Write-Host "Note: /quiet parameter may be ignored on Windows 10 1507+" -ForegroundColor Yellow
+    }
+    
+    if ($Quiet) {
+        $wusaArgs += "/quiet"
+    }
+    
+    Write-Host "Executing: wusa.exe $wusaArgs" -ForegroundColor Cyan
+    
+    $process = Start-Process -FilePath "wusa.exe" -ArgumentList $wusaArgs -Wait -PassThru -NoNewWindow
+    $exitCode = $process.ExitCode
+    
+    # Enhanced error mapping
+    $errorMessage = switch ($exitCode) {
+        0 { "Success" }
+        3010 { "Success - restart required" }
+        2 { "Invalid KB number or update not found" }
+        5 { "Access denied" }
+        2359302 { "Combined SSU/LCU package - cannot be removed via WUSA" }
+        2147942487 { "Invalid parameter - quiet mode ignored" }
+        -2145124318 { "Update cannot be removed" }
+        default { "WUSA error code: $exitCode" }
+    }
+    
+    return [PSCustomObject]@{
+        Success = ($exitCode -eq 0 -or $exitCode -eq 3010)
+        ExitCode = $exitCode
+        Message = $errorMessage
+        Method = "WUSA"
     }
 }
 
@@ -2370,56 +2593,100 @@ if (-not ($KBNumbers -or $CheckBlockStatus -or $a -or $BlockUpdate -or $UnblockU
                         
                         Write-Host "Removing $($update.HotFixID)..." -ForegroundColor Red
                         
-                        # Method 1: Universal WUSA approach (fastest, try first)
-                        Write-Host "Trying Windows Update Standalone Installer (WUSA)..." -ForegroundColor Gray
-                        $cleanKB = $kbNumber -replace "^KB", ""
-                        $wusaArgs = "/uninstall", "/kb:$cleanKB", "/quiet", "/norestart"
-                        $wusaProcess = Start-Process -FilePath "wusa.exe" -ArgumentList $wusaArgs -Wait -PassThru -NoNewWindow
-                        
-                        if ($wusaProcess.ExitCode -eq 0 -or $wusaProcess.ExitCode -eq 3010) {
-                            $removeSuccess = $true
-                            $removalMethods += "WUSA"
-                            Write-Host "Successfully removed via WUSA" -ForegroundColor Green
-                        } else {
-                            $wusaError = switch ($wusaProcess.ExitCode) {
-                                5 { "Access denied - requires administrator privileges" }
-                                87 { "Invalid parameter - KB may not exist or format incorrect" }
-                                2359302 { "Update not found or not applicable - may be combined SSU/LCU package" }
-                                3010 { "Success, restart required" }
-                                default { "WUSA error code: $($wusaProcess.ExitCode)" }
+                        # Check for new parameter-based processing
+                        if ($UsePSWindowsUpdate -and (Test-PSWindowsUpdateModule)) {
+                            Write-Host "Using PSWindowsUpdate module..." -ForegroundColor Cyan
+                            $result = Remove-UpdateWithPSWindowsUpdate -KBNumber $kbNumber -HideUpdate:$HideUpdate
+                            if ($result) {
+                                $removeSuccess = $true
+                                $removalMethods += "PSWindowsUpdate"
+                                Write-Host "Successfully processed via PSWindowsUpdate" -ForegroundColor Green
+                            } else {
+                                $errorDetails += "PSWindowsUpdate: Module failed"
                             }
-                            Write-Host "   [!] WUSA failed: $wusaError" -ForegroundColor Yellow
-                            $errorDetails += "WUSA: $wusaError"
                         }
+                        elseif ($DateRange) {
+                            Write-Host "Processing date-based removal..." -ForegroundColor Cyan
+                            if ($DateRange -match "^(\d{4}-\d{2}-\d{2}):(\d{4}-\d{2}-\d{2})$") {
+                                $startDate = [datetime]::Parse($matches[1])
+                                $endDate = [datetime]::Parse($matches[2])
+                                $result = Remove-UpdatesByDateRange -StartDate $startDate -EndDate $endDate -WhatIf:$ListOnly
+                                if ($result) {
+                                    $removeSuccess = $true
+                                    $removalMethods += "DateRange"
+                                }
+                            } else {
+                                Write-Host "Invalid date range format. Use: YYYY-MM-DD:YYYY-MM-DD" -ForegroundColor Red
+                            }
+                        }
+                        elseif ($RemoteComputer) {
+                            Write-Host "Processing remote removal for $RemoteComputer..." -ForegroundColor Cyan
+                            $result = Invoke-RemoteUpdateRemoval -ComputerName $RemoteComputer -KBNumber $kbNumber
+                            if ($result.Success) {
+                                $removeSuccess = $true
+                                $removalMethods += "Remote"
+                                Write-Host "Successfully processed remotely" -ForegroundColor Green
+                            } else {
+                                $errorDetails += "Remote: $($result.Message)"
+                            }
+                        }
+                        else {
+                            # Enhanced multi-method fallback approach
+                            
+                            # Method 1: Enhanced WUSA approach (fastest, try first)
+                            Write-Host "Trying Windows Update Standalone Installer (WUSA)..." -ForegroundColor Gray
+                            $result = Remove-UpdateWithWUSA -KBNumber $kbNumber -Quiet
+                            if ($result.Success) {
+                                $removeSuccess = $true
+                                $removalMethods += $result.Method
+                                Write-Host "Successfully removed via $($result.Method)" -ForegroundColor Green
+                            } else {
+                                Write-Host "   [!] WUSA failed: $($result.Message)" -ForegroundColor Yellow
+                                $errorDetails += "WUSA: $($result.Message)"
+                            }
 
-                        # Method 2: DISM approach (fallback)
-                        if (-not $removeSuccess) {
-                            Write-Host "Trying DISM package discovery..." -ForegroundColor Gray
-                            $dismAvailable = Get-Command "dism.exe" -ErrorAction SilentlyContinue
-                            if ($dismAvailable) {
-                                try {
-                                    $dismOutput = & dism /online /get-packages /format:table 2>$null
-                                    $kbPackages = $dismOutput | Where-Object { $_ -match "Package.*KB$cleanKB" -or $_ -match "KB$cleanKB.*Package" }
-                                    
-                                    if ($kbPackages) {
-                                        foreach ($packageLine in $kbPackages) {
-                                            if ($packageLine -match "Package Identity : (.*)") {
-                                                $packageName = $matches[1].Trim()
-                                                Write-Host "Testing package: $packageName" -ForegroundColor Gray
-                                                
-                                                # Use Remove-DISMPackage function
-                                                $result = Remove-DISMPackage -PackageName $packageName -Quiet -NoRestart
-                                                if ($result.Success) {
-                                                    $removeSuccess = $true
-                                                    $removalMethods += "DISM ($packageName)"
-                                                    Write-Host "   $($result.Message)" -ForegroundColor Green
-                                                    break
+                            # Method 2: PSWindowsUpdate module (if available)
+                            if (-not $removeSuccess -and (Test-PSWindowsUpdateModule)) {
+                                Write-Host "Trying PSWindowsUpdate module..." -ForegroundColor Gray
+                                $result = Remove-UpdateWithPSWindowsUpdate -KBNumber $kbNumber
+                                if ($result) {
+                                    $removeSuccess = $true
+                                    $removalMethods += "PSWindowsUpdate"
+                                    Write-Host "Successfully removed via PSWindowsUpdate" -ForegroundColor Green
+                                } else {
+                                    $errorDetails += "PSWindowsUpdate: Module failed"
+                                }
+                            }
+
+                            # Method 3: DISM approach (fallback)
+                            if (-not $removeSuccess) {
+                                Write-Host "Trying DISM package discovery..." -ForegroundColor Gray
+                                $dismAvailable = Get-Command "dism.exe" -ErrorAction SilentlyContinue
+                                if ($dismAvailable) {
+                                    try {
+                                        $dismOutput = & dism /online /get-packages /format:table 2>$null
+                                        $kbPackages = $dismOutput | Where-Object { $_ -match "Package.*KB$cleanKB" -or $_ -match "KB$cleanKB.*Package" }
+                                        
+                                        if ($kbPackages) {
+                                            foreach ($packageLine in $kbPackages) {
+                                                if ($packageLine -match "Package Identity : (.*)") {
+                                                    $packageName = $matches[1].Trim()
+                                                    Write-Host "Testing package: $packageName" -ForegroundColor Gray
+                                                    
+                                                    # Use Remove-DISMPackage function
+                                                    $result = Remove-DISMPackage -PackageName $packageName -Quiet -NoRestart
+                                                    if ($result.Success) {
+                                                        $removeSuccess = $true
+                                                        $removalMethods += "DISM ($packageName)"
+                                                        Write-Host "   $($result.Message)" -ForegroundColor Green
+                                                        break
+                                                    }
                                                 }
                                             }
                                         }
+                                    } catch {
+                                        Write-Host "   [!] DISM search error: $($_.Exception.Message)" -ForegroundColor Yellow
                                     }
-                                } catch {
-                                    Write-Host "   [!] DISM search error: $($_.Exception.Message)" -ForegroundColor Yellow
                                 }
                             }
                         }
@@ -2428,6 +2695,8 @@ if (-not ($KBNumbers -or $CheckBlockStatus -or $a -or $BlockUpdate -or $UnblockU
                             Write-Host "Successfully processed $($update.HotFixID)" -ForegroundColor Green
                         } else {
                             Write-Host "Failed to process $($update.HotFixID)" -ForegroundColor Red
+                            Write-Host "Attempted methods: $($removalMethods -join ', ')" -ForegroundColor Gray
+                            Write-Host "Errors: $($errorDetails -join '; ')" -ForegroundColor Yellow
                         }
                     } catch {
                         Write-Host "Failed to process $($update.HotFixID): $($_.Exception.Message)" -ForegroundColor Red
@@ -2626,6 +2895,36 @@ if ($updatesToProcess.Count -eq 0) {
     exit 0
 }
 
+# Handle new parameter-based operations
+if ($DateRange) {
+    Write-Host "Processing date-based removal..." -ForegroundColor Cyan
+    if ($DateRange -match "^(\d{4}-\d{2}-\d{2}):(\d{4}-\d{2}-\d{2})$") {
+        $startDate = [datetime]::Parse($matches[1])
+        $endDate = [datetime]::Parse($matches[2])
+        $result = Remove-UpdatesByDateRange -StartDate $startDate -EndDate $endDate -WhatIf:$ListOnly
+        exit 0
+    } else {
+        Write-Host "Invalid date range format. Use: YYYY-MM-DD:YYYY-MM-DD" -ForegroundColor Red
+        exit 1
+    }
+}
+
+# Handle PSWindowsUpdate module installation if requested
+if ($UsePSWindowsUpdate -and -not (Test-PSWindowsUpdateModule)) {
+    Write-Host "PSWindowsUpdate module requested but not available. Installing..." -ForegroundColor Yellow
+    $installed = Install-PSWindowsUpdateModule
+    if (-not $installed) {
+        Write-Host "Failed to install PSWindowsUpdate module. Exiting..." -ForegroundColor Red
+        exit 1
+    }
+}
+
+# Handle remote computer operations
+if ($RemoteComputer) {
+    Write-Host "Setting up remote connection to $RemoteComputer..." -ForegroundColor Cyan
+    # Remote processing will be handled in the removal logic
+}
+
 # Validate selected updates for combined SSU/LCU packages
 $selectedKBs = $updatesToProcess | ForEach-Object { Get-NormalizedKBNumber $_.HotFixID }
 if (-not (Validate-KBInput -KBNumbers $selectedKBs)) {
@@ -2816,41 +3115,94 @@ foreach ($update in $updatesToProcess) {
             # Silently continue if Windows Update log access fails
         }
         
-        # Method 1: Universal WUSA approach (fastest, try first)
-        Write-Host "Trying Windows Update Standalone Installer (WUSA)..." -ForegroundColor Gray
+        # Enhanced multi-method removal with new capabilities
         
-        # Clean KB input for WUSA (remove KB prefix)
-        $cleanKB = $kb -replace "^KB", ""
-        
-        $wusaArgs = "/uninstall", "/kb:$cleanKB", "/quiet", "/norestart"
-        $wusaProcess = Start-Process -FilePath "wusa.exe" -ArgumentList $wusaArgs -Wait -PassThru -NoNewWindow
-        
-        if ($wusaProcess.ExitCode -eq 0 -or $wusaProcess.ExitCode -eq 3010) {
-            $removeSuccess = $true
-            $removalMethods += "WUSA"
-            Write-Host "Successfully removed via WUSA" -ForegroundColor Green
-        } else {
-            $wusaError = switch ($wusaProcess.ExitCode) {
-                5 { "Access denied - requires administrator privileges" }
-                87 { "Invalid parameter - KB may not exist or format incorrect" }
-                2359302 { "Update not found or not applicable - may be combined SSU/LCU package" }
-                3010 { "Success, restart required" }
-                default { "WUSA error code: $($wusaProcess.ExitCode)" }
-            }
-            Write-Host "   [!] WUSA failed: $wusaError" -ForegroundColor Yellow
-            $errorDetails += "WUSA: $wusaError"
-            
-            # Check for combined SSU/LCU packages
-            $combinedSSUPackages = @("5063878", "5062839", "5062978", "5034441", "5034127", "5031356", "5029331", "5028166", "5027231", "5025221")
-            if ($combinedSSUPackages -contains $cleanKB -and $wusaProcess.ExitCode -eq 2359302) {
-                Write-Host "   [!] This appears to be a combined SSU/LCU package that cannot be removed via WUSA" -ForegroundColor Yellow
-                Write-Host "   [i] Combined packages contain Servicing Stack Updates (SSU) which are permanent" -ForegroundColor Cyan
-                Write-Host "   [i] Use DISM or PowerShell cmdlets instead" -ForegroundColor Cyan
-                Write-Host '   [i] Settings -> Windows Update -> Update History -> Uninstall updates' -ForegroundColor Cyan
+        # Method 1: PSWindowsUpdate module (if requested and available)
+        if ($UsePSWindowsUpdate -and (Test-PSWindowsUpdateModule)) {
+            Write-Host "Trying PSWindowsUpdate module..." -ForegroundColor Cyan
+            try {
+                $result = Remove-UpdateWithPSWindowsUpdate -KB $kb -Hide:$HideUpdate -WhatIf:$ListOnly
+                if ($result.Success) {
+                    $removeSuccess = $true
+                    $removalMethods += "PSWindowsUpdate"
+                    Write-Host "Successfully removed via PSWindowsUpdate module" -ForegroundColor Green
+                    if ($HideUpdate) {
+                        Write-Host "Update also hidden from Windows Update" -ForegroundColor Green
+                    }
+                } else {
+                    Write-Host "   [!] PSWindowsUpdate failed: $($result.Error)" -ForegroundColor Yellow
+                    $errorDetails += "PSWindowsUpdate: $($result.Error)"
+                }
+            } catch {
+                Write-Host "   [!] PSWindowsUpdate module error: $($_.Exception.Message)" -ForegroundColor Yellow
+                $errorDetails += "PSWindowsUpdate: $($_.Exception.Message)"
             }
         }
 
-        # Method 2: Universal DISM package discovery and removal (robust fallback)
+        # Method 2: Enhanced WUSA with Windows 10 1507+ support
+        if (-not $removeSuccess) {
+            Write-Host "Trying Windows Update Standalone Installer (WUSA)..." -ForegroundColor Gray
+            
+            # Check for Windows 10 1507+ WUSA limitations
+            $wusaTest = Test-WUSAQuietMode -KB $kb
+            if (-not $wusaTest.CanUseWUSA) {
+                Write-Host "   [!] WUSA not supported for this update on Windows 10 1507+: $($wusaTest.Reason)" -ForegroundColor Yellow
+                $errorDetails += "WUSA limitation: $($wusaTest.Reason)"
+            } else {
+                # Clean KB input for WUSA (remove KB prefix)
+                $cleanKB = $kb -replace "^KB", ""
+                
+                $wusaArgs = "/uninstall", "/kb:$cleanKB", "/quiet", "/norestart"
+                $wusaProcess = Start-Process -FilePath "wusa.exe" -ArgumentList $wusaArgs -Wait -PassThru -NoNewWindow
+                
+                if ($wusaProcess.ExitCode -eq 0 -or $wusaProcess.ExitCode -eq 3010) {
+                    $removeSuccess = $true
+                    $removalMethods += "WUSA"
+                    Write-Host "Successfully removed via WUSA" -ForegroundColor Green
+                } else {
+                    $wusaError = switch ($wusaProcess.ExitCode) {
+                        5 { "Access denied - requires administrator privileges" }
+                        87 { "Invalid parameter - KB may not exist or format incorrect" }
+                        2359302 { "Update not found or not applicable - may be combined SSU/LCU package" }
+                        3010 { "Success, restart required" }
+                        2149842967 { "Update not applicable - Windows 10 1507+ limitation" }
+                        2149842966 { "Update not found - package database issue" }
+                        default { "WUSA error code: $($wusaProcess.ExitCode)" }
+                    }
+                    Write-Host "   [!] WUSA failed: $wusaError" -ForegroundColor Yellow
+                    $errorDetails += "WUSA: $wusaError"
+                    
+                    # Check for combined SSU/LCU packages
+                    $combinedSSUPackages = @("5063878", "5062839", "5062978", "5034441", "5034127", "5031356", "5029331", "5028166", "5027231", "5025221")
+                    if ($combinedSSUPackages -contains $cleanKB -and $wusaProcess.ExitCode -eq 2359302) {
+                        Write-Host "   [!] This appears to be a combined SSU/LCU package that cannot be removed via WUSA" -ForegroundColor Yellow
+                        Write-Host "   [i] Combined packages contain Servicing Stack Updates (SSU) which are permanent" -ForegroundColor Cyan
+                        Write-Host "   [i] Use DISM or PowerShell cmdlets instead" -ForegroundColor Cyan
+                        Write-Host '   [i] Settings -> Windows Update -> Update History -> Uninstall updates' -ForegroundColor Cyan
+                    }
+                }
+            }
+        }
+
+        # Method 3: PSWindowsUpdate fallback (if available but not requested)
+        if (-not $removeSuccess -and -not $UsePSWindowsUpdate -and (Test-PSWindowsUpdateModule)) {
+            Write-Host "Trying PSWindowsUpdate module as fallback..." -ForegroundColor Gray
+            try {
+                $result = Remove-UpdateWithPSWindowsUpdate -KB $kb -Hide:$HideUpdate -WhatIf:$ListOnly
+                if ($result.Success) {
+                    $removeSuccess = $true
+                    $removalMethods += "PSWindowsUpdate (fallback)"
+                    Write-Host "Successfully removed via PSWindowsUpdate module" -ForegroundColor Green
+                } else {
+                    Write-Host "   [!] PSWindowsUpdate fallback failed: $($result.Error)" -ForegroundColor Yellow
+                    $errorDetails += "PSWindowsUpdate fallback: $($result.Error)"
+                }
+            } catch {
+                Write-Host "   [!] PSWindowsUpdate fallback error: $($_.Exception.Message)" -ForegroundColor Gray
+            }
+        }
+
+        # Method 4: Universal DISM package discovery and removal (robust fallback)
         if (-not $removeSuccess) {
             Write-Host "Trying universal DISM package discovery..." -ForegroundColor Gray
             
@@ -2903,56 +3255,6 @@ foreach ($update in $updatesToProcess) {
                     Write-Host "   [!] DISM search error: $($_.Exception.Message)" -ForegroundColor Yellow
                     $errorDetails += "DISM search failed: $($_.Exception.Message)"
                 }
-            }
-        }
-
-        # Method 3: PowerShell cmdlets (Windows 10+ fallback)
-        if (-not $removeSuccess) {
-            Write-Host "Trying PowerShell Remove-WindowsPackage..." -ForegroundColor Gray
-            try {
-                $cleanKB = $kb -replace "^KB", ""
-                $psPackages = Get-WindowsPackage -Online -ErrorAction SilentlyContinue | 
-                    Where-Object { $_.PackageName -like "*KB$cleanKB*" }
-                
-                foreach ($package in $psPackages) {
-                    Write-Host "Found PowerShell package: $($package.PackageName)" -ForegroundColor Green
-                    try {
-                        Remove-WindowsPackage -Online -PackageName $package.PackageName -NoRestart -ErrorAction Stop
-                        $removeSuccess = $true
-                        $removalMethods += "PowerShell cmdlet ($($package.PackageName))"
-                        Write-Host "Successfully removed via PowerShell cmdlet" -ForegroundColor Green
-                        break
-                    } catch {
-                        Write-Host "   [!] PowerShell removal failed: $($_.Exception.Message)" -ForegroundColor Yellow
-                        $errorDetails += "PowerShell: $($_.Exception.Message)"
-                    }
-                }
-            } catch {
-                Write-Host "   [!] PowerShell cmdlets not available or failed: $($_.Exception.Message)" -ForegroundColor Gray
-            }
-        }
-        
-        # Method 4: Try PowerShell Windows Update API
-        if (-not $removeSuccess) {
-            Write-Host "Trying Windows Update API..." -ForegroundColor Gray
-            try {
-                $session = New-Object -ComObject "Microsoft.Update.Session"
-                $searcher = $session.CreateUpdateSearcher()
-                $updates = $searcher.Search("IsInstalled=1 and Type='Software'")
-                
-                foreach ($update in $updates.Updates) {
-                    if ($update.KBArticleIDs -contains $kb) {
-                        $installer = $update.CreateUpdateInstaller()
-                        $installationResult = $installer.Uninstall()
-                        if ($installationResult.ResultCode -eq 2) {
-                            $removeSuccess = $true
-                            $removalMethods += "Windows Update API"
-                            break
-                        }
-                    }
-                }
-            } catch {
-                $errorDetails += "Windows Update API error: $($_.Exception.Message)"
             }
         }
         
@@ -3008,6 +3310,25 @@ foreach ($update in $updatesToProcess) {
         }
         
         $failedUpdates.Add($kb)
+    }
+}
+
+# Handle remote computer processing
+if ($RemoteComputer) {
+    Write-Host "`n--- Remote Computer Processing ---" -ForegroundColor Cyan
+    try {
+        $remoteResult = Invoke-RemoteUpdateRemoval -ComputerName $RemoteComputer -KBs $updatesToProcess.HotFixID -UsePSWindowsUpdate:$UsePSWindowsUpdate -HideUpdate:$HideUpdate
+        if ($remoteResult.Success) {
+            Write-Host "Remote processing completed successfully" -ForegroundColor Green
+            Write-Host "Updates processed remotely: $($remoteResult.ProcessedCount)" -ForegroundColor Green
+            Write-Host "Failed removals: $($remoteResult.FailedKBs -join ', ')" -ForegroundColor Yellow
+        } else {
+            Write-Host "Remote processing failed: $($remoteResult.Error)" -ForegroundColor Red
+        }
+        exit 0
+    } catch {
+        Write-Host "Remote processing error: $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
     }
 }
 
