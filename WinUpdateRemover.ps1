@@ -1,13 +1,13 @@
 <#
 .SYNOPSIS
-    Windows Update Remover - Safely remove and block problematic Windows Updates with automatic restore point protection
+    Windows Update Remover - Safely remove and block Windows Updates with automatic restore point protection
 
 .DESCRIPTION
     WinUpdateRemover is an interactive PowerShell tool designed to help Windows administrators and power users safely remove and block problematic Windows Updates that may cause system instability, performance issues, or hardware problems.
     
     Features:
     - Safe Removal Process: Automatic System Restore point creation before any changes
-    - Targeted Removal: Remove specific problematic updates
+    - Targeted Removal: Remove specifi updates
     - Update Blocking: Prevent specific updates from being installed via registry-based blocking
     - Enhanced Error Handling: Improved handling for 0x800f0805 and other common errors
     - Multi-Method Removal: Enhanced removal approaches including PSWindowsUpdate module support
@@ -62,7 +62,7 @@
 
 .NOTES
     Author: @danalec
-    Version: 1.0.18
+    Version: 1.0.19
     Requires: Administrator privileges
     
     Troubleshooting System Restore Issues:
@@ -132,7 +132,7 @@ param(
 )
 
 $Script:ScriptName = "WinUpdateRemover"
-$Script:Version = "v1.0.18"
+$Script:Version = "v1.0.19"
 $ErrorActionPreference = "Stop"
 
 # Enhanced DISM Functions for Advanced Package Management
@@ -271,8 +271,29 @@ function Test-SSUDetection {
         "KB5031356", "KB5029331", "KB5028166", "KB5027231", "KB5025221"
     )
     
+    $criticalKB5063878 = @("KB5063878")
+    
     $normalizedKB = $KBNumber -replace "KB", ""
     $fullKB = "KB$normalizedKB"
+    
+    if ($criticalKB5063878 -contains $fullKB) {
+        Write-Host "`n================================================================================" -ForegroundColor Red
+        Write-Host "[!] CRITICAL ALERT: KB5063878 DETECTED! [!]" -ForegroundColor Black -BackgroundColor Red
+        Write-Host "================================================================================" -ForegroundColor Red
+        Write-Host "SEVERITY: CRITICAL - SSD/HDD CORRUPTION RISK" -ForegroundColor Red
+        Write-Host "IMPACT: This update has been reported to cause SSD and HDD corruption issues" -ForegroundColor Yellow
+        Write-Host "REMOVAL: Combined SSU/LCU package - CANNOT be removed via automated methods" -ForegroundColor Yellow
+        Write-Host "MANUAL REMOVAL REQUIRED:" -ForegroundColor Cyan
+        Write-Host "   1. Settings -> Windows Update -> Update History -> Uninstall updates" -ForegroundColor White
+        Write-Host "   2. Select KB5063878 and click Uninstall" -ForegroundColor White
+        Write-Host "   3. Restart when prompted" -ForegroundColor White
+        Write-Host "BACKUP: Consider backing up important data before removal" -ForegroundColor Magenta
+        Write-Host "================================================================================" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Opening Windows Settings -> Update History..." -ForegroundColor Cyan
+        Start-Process "explorer.exe" "shell:::{d450a8a1-9568-45c7-9c0e-b4f9fb4537bd}"
+        return $true
+    }
     
     if ($ssuUpdates -contains $fullKB) {
         Write-Host "`n[SSU WARNING] $fullKB contains Servicing Stack Updates (SSU)" -ForegroundColor Black -BackgroundColor Yellow
@@ -552,15 +573,17 @@ $problematicKBs = @(
     'KB5062554',  # HIGH: Various system issues - Jul 2025 - ACTIVE ISSUE  
     
     # Additional Combined SSU/LCU packages - Cannot be removed via WUSA
-    'KB5062839',  # Combined SSU/LCU - requires manual removal via Windows Settings > Update & Security > Update History > Uninstall updates
-    'KB5062978',  # Combined SSU/LCU - requires manual removal via Windows Settings > Update & Security > Update History > Uninstall updates
-    'KB5034441',  # Combined SSU/LCU - requires manual removal via Windows Settings > Update & Security > Update History > Uninstall updates
-    'KB5034127',  # Combined SSU/LCU - requires manual removal via Windows Settings > Update & Security > Update History > Uninstall updates
-    'KB5031356',  # Combined SSU/LCU - requires manual removal via Windows Settings > Update & Security > Update History > Uninstall updates
-    'KB5029331',  # Combined SSU/LCU - requires manual removal via Windows Settings > Update & Security > Update History > Uninstall updates
-    'KB5028166',  # Combined SSU/LCU - requires manual removal via Windows Settings > Update & Security > Update History > Uninstall updates
-    'KB5027231',  # Combined SSU/LCU - requires manual removal via Windows Settings > Update & Security > Update History > Uninstall updates
-    'KB5025221'   # Combined SSU/LCU - requires manual removal via Windows Settings > Update & Security > Update History > Uninstall updates
+    # MANUAL REMOVAL REQUIRED: Settings -> Windows Update -> Update History -> Uninstall updates
+    'KB5063878',  # CRITICAL: SSD/HDD CORRUPTION RISK - MANUAL REMOVAL ONLY via Windows Settings
+    'KB5062839',  # Combined SSU/LCU - MANUAL REMOVAL ONLY via Windows Settings
+    'KB5062978',  # Combined SSU/LCU - MANUAL REMOVAL ONLY via Windows Settings
+    'KB5034441',  # Combined SSU/LCU - MANUAL REMOVAL ONLY via Windows Settings
+    'KB5034127',  # Combined SSU/LCU - MANUAL REMOVAL ONLY via Windows Settings
+    'KB5031356',  # Combined SSU/LCU - MANUAL REMOVAL ONLY via Windows Settings
+    'KB5029331',  # Combined SSU/LCU - MANUAL REMOVAL ONLY via Windows Settings
+    'KB5028166',  # Combined SSU/LCU - MANUAL REMOVAL ONLY via Windows Settings
+    'KB5027231',  # Combined SSU/LCU - MANUAL REMOVAL ONLY via Windows Settings
+    'KB5025221'   # Combined SSU/LCU - MANUAL REMOVAL ONLY via Windows Settings
 )
 
 # Scan for installed updates
@@ -1282,27 +1305,61 @@ function Test-CombinedSSUUpdates {
                 Description = $installed.Description
                 ManualRemovalRequired = $true
             }
-            Write-Host "[CRITICAL] MANUAL REMOVAL REQUIRED: $kb - INSTALLED" -ForegroundColor Black -BackgroundColor Yellow
-            Write-Host "    This update contains permanent Servicing Stack components" -ForegroundColor Red
-            Write-Host "    Installed on: $($installed.InstalledOn)" -ForegroundColor White
-            Write-Host "    Description: $($installed.Description)" -ForegroundColor White
-            Write-Host "    Manual removal required via: Settings -> Windows Update -> Update History -> Uninstall updates" -ForegroundColor Cyan
-            Write-Host "    Cannot be removed via WUSA or automated scripts" -ForegroundColor Red
-            Write-Host ""
+            
+            if ($kb -eq "KB5063878") {
+                Write-Host "`n================================================================================" -ForegroundColor Red
+                Write-Host "🚨 CRITICAL ALERT: KB5063878 DETECTED! 🚨" -ForegroundColor Black -BackgroundColor Red
+                Write-Host "================================================================================" -ForegroundColor Red
+                Write-Host "SEVERITY: CRITICAL - SSD/HDD CORRUPTION RISK" -ForegroundColor Red
+                Write-Host "IMPACT: This update has been reported to cause SSD and HDD corruption issues" -ForegroundColor Yellow
+                Write-Host "INSTALLED ON: $($installed.InstalledOn)" -ForegroundColor White
+                Write-Host "DESCRIPTION: $($installed.Description)" -ForegroundColor White
+                Write-Host "REMOVAL: Combined SSU/LCU package - CANNOT be removed via automated methods" -ForegroundColor Yellow
+                Write-Host "MANUAL REMOVAL REQUIRED:" -ForegroundColor Cyan
+                Write-Host "   1. Settings -> Windows Update -> Update History -> Uninstall updates" -ForegroundColor White
+                Write-Host "   2. Select KB5063878 and click Uninstall" -ForegroundColor White
+                Write-Host "   3. Restart when prompted" -ForegroundColor White
+                Write-Host "BACKUP: Consider backing up important data before removal" -ForegroundColor Magenta
+                Write-Host "================================================================================" -ForegroundColor Red
+                Write-Host ""
+            } else {
+                Write-Host "[CRITICAL] MANUAL REMOVAL REQUIRED: $kb - INSTALLED" -ForegroundColor Black -BackgroundColor Yellow
+                Write-Host "    This update contains permanent Servicing Stack components" -ForegroundColor Red
+                Write-Host "    Installed on: $($installed.InstalledOn)" -ForegroundColor White
+                Write-Host "    Description: $($installed.Description)" -ForegroundColor White
+                Write-Host "    Manual removal required via: Settings -> Windows Update -> Update History -> Uninstall updates" -ForegroundColor Cyan
+                Write-Host "    Cannot be removed via WUSA or automated scripts" -ForegroundColor Red
+                Write-Host ""
+            }
         }
     }
     
     if ($foundCombinedUpdates.Count -eq 0) {
         Write-Host "[OK] No combined SSU/LCU updates found that require manual removal." -ForegroundColor Green
     } else {
-        Write-Host "================================================================================" -ForegroundColor Red
-        Write-Host "CRITICAL ALERT: $($foundCombinedUpdates.Count) combined SSU/LCU update(s) detected!" -ForegroundColor Black -BackgroundColor Yellow
-        Write-Host "================================================================================" -ForegroundColor Red
-        Write-Host "These updates contain permanent Servicing Stack components" -ForegroundColor Yellow
-        Write-Host "They CANNOT be removed via WUSA or automated scripts" -ForegroundColor Red
-        Write-Host "Manual removal ONLY via: Settings -> Windows Update -> Update History -> Uninstall updates" -ForegroundColor Cyan
-        Write-Host "Proceed with caution - removing these may affect system stability" -ForegroundColor Yellow
-        Write-Host "================================================================================" -ForegroundColor Red
+        $hasKB5063878 = $foundCombinedUpdates | Where-Object { $_.KBNumber -eq "KB5063878" }
+        
+        if ($hasKB5063878) {
+            Write-Host "================================================================================" -ForegroundColor Red
+            Write-Host "🚨 CRITICAL ALERT: KB5063878 SSD/HDD CORRUPTION UPDATE DETECTED! 🚨" -ForegroundColor Black -BackgroundColor Red
+            Write-Host "================================================================================" -ForegroundColor Red
+            Write-Host "SEVERITY: CRITICAL - IMMEDIATE ACTION REQUIRED" -ForegroundColor Red
+            Write-Host "This update has been reported to cause SSD and HDD corruption issues" -ForegroundColor Yellow
+            Write-Host "MANUAL REMOVAL REQUIRED IMMEDIATELY:" -ForegroundColor Cyan
+            Write-Host "   Settings -> Windows Update -> Update History -> Uninstall updates" -ForegroundColor White
+            Write-Host "   Select KB5063878 and click Uninstall, then restart" -ForegroundColor White
+            Write-Host "BACKUP: Consider backing up important data before removal" -ForegroundColor Magenta
+            Write-Host "================================================================================" -ForegroundColor Red
+        } else {
+            Write-Host "================================================================================" -ForegroundColor Red
+            Write-Host "CRITICAL ALERT: $($foundCombinedUpdates.Count) combined SSU/LCU update(s) detected!" -ForegroundColor Black -BackgroundColor Yellow
+            Write-Host "================================================================================" -ForegroundColor Red
+            Write-Host "These updates contain permanent Servicing Stack components" -ForegroundColor Yellow
+            Write-Host "They CANNOT be removed via WUSA or automated scripts" -ForegroundColor Red
+            Write-Host "Manual removal ONLY via: Settings -> Windows Update -> Update History -> Uninstall updates" -ForegroundColor Cyan
+            Write-Host "Proceed with caution - removing these may affect system stability" -ForegroundColor Yellow
+            Write-Host "================================================================================" -ForegroundColor Red
+        }
     }
     
     Write-Host ""
@@ -1316,18 +1373,40 @@ function Validate-KBInput {
         [string[]]$KBNumbers
     )
     
+    $criticalKB5063878 = "KB5063878"
     $combinedSSUUpdates = @(
         "KB5063878", "KB5062839", "KB5062978", "KB5034441", "KB5034127",
         "KB5031356", "KB5029331", "KB5028166", "KB5027231", "KB5025221"
     )
     
+    $criticalWarnings = @()
     $warnings = @()
     
     foreach ($kb in $KBNumbers) {
         $normalizedKB = Get-NormalizedKBNumber $kb
-        if ($combinedSSUUpdates -contains "KB$normalizedKB") {
-            $warnings += "KB$normalizedKB is a combined SSU/LCU package that requires manual removal via Settings GUI."
+        $fullKB = "KB$normalizedKB"
+        
+        if ($fullKB -eq $criticalKB5063878) {
+            $criticalWarnings += "KB5063878 - CRITICAL SSD/HDD CORRUPTION RISK"
+        } elseif ($combinedSSUUpdates -contains $fullKB) {
+            $warnings += "$fullKB is a combined SSU/LCU package that requires manual removal via Settings GUI."
         }
+    }
+    
+    if ($criticalWarnings.Count -gt 0) {
+        Write-Host "`n================================================================================" -ForegroundColor Red
+        Write-Host "🚨 CRITICAL ALERT: KB5063878 DETECTED! 🚨" -ForegroundColor Black -BackgroundColor Red
+        Write-Host "================================================================================" -ForegroundColor Red
+        Write-Host "SEVERITY: CRITICAL - SSD/HDD CORRUPTION RISK" -ForegroundColor Red
+        Write-Host "IMPACT: This update has been reported to cause SSD and HDD corruption issues" -ForegroundColor Yellow
+        Write-Host "REMOVAL: Combined SSU/LCU package - CANNOT be removed via automated methods" -ForegroundColor Yellow
+        Write-Host "MANUAL REMOVAL REQUIRED:" -ForegroundColor Cyan
+        Write-Host "   1. Settings -> Windows Update -> Update History -> Uninstall updates" -ForegroundColor White
+        Write-Host "   2. Select KB5063878 and click Uninstall" -ForegroundColor White
+        Write-Host "   3. Restart when prompted" -ForegroundColor White
+        Write-Host "BACKUP: Consider backing up important data before removal" -ForegroundColor Magenta
+        Write-Host "================================================================================" -ForegroundColor Red
+        Write-Host ""
     }
     
     if ($warnings.Count -gt 0) {
