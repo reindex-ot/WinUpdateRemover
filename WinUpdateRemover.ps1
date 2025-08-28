@@ -2369,38 +2369,38 @@ if (-not ($KBNumbers -or $CheckBlockStatus -or $a -or $BlockUpdate -or $UnblockU
         # Interactive menu - loop until user exits
         do {
             Clear-Host
-            Write-Host "====================================" -ForegroundColor Cyan
-            Write-Host "    Windows Update Remover $($Script:Version)" -ForegroundColor White
-            Write-Host "====================================" -ForegroundColor Cyan
+            Write-Host "========================================" -ForegroundColor Cyan
+            Write-Host "    Windows Update Remover $($Script:Version) - JP" -ForegroundColor White
+            Write-Host "========================================" -ForegroundColor Cyan
             Write-Host ""
 
             $osInfo = Get-CimInstance Win32_OperatingSystem
-            Write-Host "System Information:" -ForegroundColor Green
+            Write-Host "システム情報:" -ForegroundColor Green
             Write-Host "OS: $($osInfo.Caption)" -ForegroundColor White
-            Write-Host "Version: $($osInfo.Version)" -ForegroundColor White
-            Write-Host "Architecture: $env:PROCESSOR_ARCHITECTURE" -ForegroundColor White
-            Write-Host "Computer: $env:COMPUTERNAME" -ForegroundColor White
+            Write-Host "バージョン: $($osInfo.Version)" -ForegroundColor White
+            Write-Host "アーキテクチャ: $env:PROCESSOR_ARCHITECTURE" -ForegroundColor White
+            Write-Host "コンピューター: $env:COMPUTERNAME" -ForegroundColor White
             Write-Host ""
-            Write-Host "=== Interactive Menu ===" -ForegroundColor Cyan
-            Write-Host "Choose an action:" -ForegroundColor Yellow
-            Write-Host "1. List installed updates" -ForegroundColor White
-            Write-Host "2. Block specific updates from installing" -ForegroundColor White
-            Write-Host "3. Unblock previously blocked updates" -ForegroundColor White
-            Write-Host "4. Check blocking status of updates" -ForegroundColor White
-            Write-Host "5. Show blocking methods information" -ForegroundColor White
-            Write-Host "6. Repair Windows Update" -ForegroundColor White
-            Write-Host "7. Run diagnostics" -ForegroundColor White
-            Write-Host "0. Exit (or type 'q' to quit)" -ForegroundColor Gray
+            Write-Host "=== インタラクティブメニュー ===" -ForegroundColor Cyan
+            Write-Host "アクションを選択してください:" -ForegroundColor Yellow
+            Write-Host "1. インストール済みの更新を一覧で表示" -ForegroundColor White
+            Write-Host "2. 特定の更新のインストールをブロック" -ForegroundColor White
+            Write-Host "3. 更新のブロックを解除" -ForegroundColor White
+            Write-Host "4. 更新のブロックの状態を確認" -ForegroundColor White
+            Write-Host "5. ブロック方法の情報を表示" -ForegroundColor White
+            Write-Host "6. Windows Update を修復" -ForegroundColor White
+            Write-Host "7. 診断を実行" -ForegroundColor White
+            Write-Host "0. 終了 (または「q」を入力で終了)" -ForegroundColor Gray
             Write-Host ""
             
-            $menuChoice = Read-Host "Enter your choice (0-7 or q to quit)"
+            $menuChoice = Read-Host "数字で選択してください (0-7 または q で終了)"
             
             switch ($menuChoice) {
                 "1" {
             # Enhanced update listing and removal functionality
             Write-Host ""
-            Write-Host "=== Comprehensive Update Listing ===" -ForegroundColor Cyan
-            Write-Host "Scanning all update sources..." -ForegroundColor Yellow
+            Write-Host "=== 包括的な更新の一覧 ===" -ForegroundColor Cyan
+            Write-Host "すべての更新ソースをスキャン中です..." -ForegroundColor Yellow
             Write-Host ""
             
             try {
@@ -2432,13 +2432,13 @@ if (-not ($KBNumbers -or $CheckBlockStatus -or $a -or $BlockUpdate -or $UnblockU
                     }
                 }
                 
-                Write-Host "Found $($allUpdates.Count) total installed updates ($($installedUpdates.Count) removable via this tool)." -ForegroundColor Green
+                Write-Host "インストールされた更新プログラムの合計数は $($allUpdates.Count) 個です。このツールで削除可能な更新プログラムは ($($installedUpdates.Count) 個存在します。" -ForegroundColor Green
                 Write-Host ""
                 
                 # Display comprehensive list grouped by source
                 $groupedUpdates = $allUpdates | Group-Object Source
                 foreach ($group in $groupedUpdates) {
-                    Write-Host "--- $($group.Name) Updates ---" -ForegroundColor Cyan
+                    Write-Host "--- $($group.Name) 更新 ---" -ForegroundColor Cyan
                     foreach ($update in $group.Group | Sort-Object InstallDate -Descending) {
                         $installDate = if ($update.InstallDate) { $update.InstallDate.ToString("yyyy-MM-dd") } else { "Unknown" }
                         
@@ -2460,22 +2460,22 @@ if (-not ($KBNumbers -or $CheckBlockStatus -or $a -or $BlockUpdate -or $UnblockU
                     Write-Host ""
                 }
                 
-                Write-Host "Note: Updates marked as 'Removable' can be removed using this tool (Get-HotFix and DISM sources)." -ForegroundColor Yellow
-                Write-Host "Other updates are shown for informational purposes only." -ForegroundColor Yellow
+                Write-Host "注意: 「削除可能」とマークされた更新は、このツール (Get-HotFix と DISM ソース) を使用して削除できます。" -ForegroundColor Yellow
+                Write-Host "その他の更新は情報提供のみを目的として表示されます。" -ForegroundColor Yellow
                 Write-Host ""
                 
                 if ($installedUpdates.Count -eq 0) {
-                    Write-Host "No updates found to remove." -ForegroundColor Yellow
-                    Read-Host "Press Enter to continue"
+                    Write-Host "削除する更新が見つかりません。" -ForegroundColor Yellow
+                    Read-Host "Enter を押して続行"
                     continue
                 }
                 
                 # Cache removability results to avoid redundant checks
                 $removabilityCache = @{}
                 
-                Write-Host "Installed Updates:" -ForegroundColor Cyan
+                Write-Host "インストール済みの更新:" -ForegroundColor Cyan
                 Write-Host "==================" -ForegroundColor Cyan
-                Write-Host "Removability Status: [OK] Removable [!] Potentially Removable [X] Not Removable" -ForegroundColor Gray
+                Write-Host "削除可能状態: [OK] 削除可能 [!] 削除可能な可能性あり [X] 削除不可" -ForegroundColor Gray
                 Write-Host ""
                 
                 # Pre-calculate all removability results
@@ -2534,11 +2534,11 @@ if (-not ($KBNumbers -or $CheckBlockStatus -or $a -or $BlockUpdate -or $UnblockU
                 $filteredUpdates = $installedUpdates
                 
                 Write-Host "Select updates to remove:" -ForegroundColor Yellow
-                Write-Host '- Enter numbers separated by commas (e.g., 1,3,5)' -ForegroundColor Yellow
-                Write-Host "- Enter 'all' or 'A' to select all updates" -ForegroundColor Gray
-                Write-Host "- Enter 'back' or 'b' to return to main menu" -ForegroundColor Gray
+                Write-Host '- 数字をコンマで区切って入力してください (例: 1,3,5)' -ForegroundColor Yellow
+                Write-Host "- すべての更新を選択するには「all」または「A」を入力してください" -ForegroundColor Gray
+                Write-Host "- メインメニューに戻るには「back」または「b」を入力してください" -ForegroundColor Gray
 
-                $selection = Read-Host "Your selection"
+                $selection = Read-Host "あなたの選択"
 
                 if ($selection -eq 'back' -or $selection -eq 'b') {
                     continue
@@ -2554,14 +2554,14 @@ if (-not ($KBNumbers -or $CheckBlockStatus -or $a -or $BlockUpdate -or $UnblockU
                         if ($index -match '^\d+$' -and [int]$index -ge 1 -and [int]$index -le $filteredUpdates.Count) {
                             $updatesToProcess += $filteredUpdates[[int]$index - 1]
                         } else {
-                            Write-Warning "Invalid selection: $index"
+                            Write-Warning "無効な選択: $index"
                         }
                     }
                 }
                 
                 if ($updatesToProcess.Count -eq 0) {
-                    Write-Host "No valid updates selected." -ForegroundColor Yellow
-                    Read-Host "Press Enter to continue"
+                    Write-Host "有効な更新が選択されていません。" -ForegroundColor Yellow
+                    Read-Host "Enter を押して続行"
                     continue
                 }
                 
@@ -2594,15 +2594,15 @@ if (-not ($KBNumbers -or $CheckBlockStatus -or $a -or $BlockUpdate -or $UnblockU
                 }
                 
                 if ($nonRemovableCount -gt 0) {
-                    Write-Host "`n[!] WARNING: $nonRemovableCount selected update(s) cannot be removed:" -ForegroundColor Red
+                    Write-Host "`n[!] 警告: 選択された更新 $nonRemovableCount は削除できません:" -ForegroundColor Red
                     foreach ($warning in $warnings) {
                         Write-Host "   - $warning" -ForegroundColor Yellow
                     }
                     
-                    $continue = Read-Host "Continue with removable updates only? (y/n)"
+                    $continue = Read-Host "削除可能な可能性ありな更新の削除を続行しますか？ (y/n)"
                     if ($continue -ne 'y') {
-                        Write-Host "Operation cancelled." -ForegroundColor Yellow
-                        Read-Host "Press Enter to continue"
+                        Write-Host "操作がキャンセルされました。" -ForegroundColor Yellow
+                        Read-Host "Enter を押して続行"
                         continue
                     }
                     
@@ -2616,38 +2616,38 @@ if (-not ($KBNumbers -or $CheckBlockStatus -or $a -or $BlockUpdate -or $UnblockU
                 if ($combinedSSUCount -gt 0) {
                     Write-Host "`n[!] NOTE: $combinedSSUCount selected update(s) are Combined SSU/LCU packages." -ForegroundColor Yellow
                     Write-Host "   These often require special handling and may fail to remove." -ForegroundColor Gray
-                    $continue = Read-Host "Continue anyway? (y/n)"
+                    $continue = Read-Host "気にせず続行しますか？ (y/n)"
                     if ($continue -ne 'y') {
-                        Write-Host "Operation cancelled." -ForegroundColor Yellow
-                        Read-Host "Press Enter to continue"
+                        Write-Host "操作がキャンセルされました。" -ForegroundColor Yellow
+                        Read-Host "Enter を押して続行"
                         continue
                     }
                 }
                 
                 if ($updatesToProcess.Count -eq 0) {
                     Write-Host "No removable updates selected." -ForegroundColor Yellow
-                    Read-Host "Press Enter to continue"
+                    Read-Host "Enter を押して続行"
                     continue
                 }
 
-                Write-Host "`nSelected $($updatesToProcess.Count) update(s) for removal:" -ForegroundColor Green
+                Write-Host "`n削除対象として選択された $($updatesToProcess.Count) 個の更新:" -ForegroundColor Green
                 foreach ($update in $updatesToProcess) {
                     Write-Host "  - $($update.HotFixID) - $($update.Description)" -ForegroundColor White
                 }
                 Write-Host ""
 
                 # Create restore point
-                Write-Host "Creating a restore point before making changes..." -ForegroundColor Yellow
+                Write-Host "変更を加える前に復元ポイントを作成します..." -ForegroundColor Yellow
             } catch {
-                Write-Host "Error scanning for updates: $($_.Exception.Message)" -ForegroundColor Red
-                Write-Host "Attempting to continue with basic update list..." -ForegroundColor Yellow
+                Write-Host "更新のスキャン中にエラーが発生しました: $($_.Exception.Message)" -ForegroundColor Red
+                Write-Host "基本的な更新の一覧を続行しようとしています..." -ForegroundColor Yellow
                 # Fallback to basic list if advanced scanning fails
                 try {
                     $installedUpdates = Get-HotFix | Where-Object { $_.HotFixID -match 'KB\d+' } | Sort-Object {[DateTime]$_.InstalledOn} -Descending
-                    Write-Host "Successfully retrieved basic update list" -ForegroundColor Green
+                    Write-Host "基本の更新の一覧を正常に取得しました" -ForegroundColor Green
                 } catch {
-                    Write-Host "Failed to retrieve any updates: $($_.Exception.Message)" -ForegroundColor Red
-                    Read-Host "Press Enter to continue"
+                    Write-Host "更新を取得できませんでした: $($_.Exception.Message)" -ForegroundColor Red
+                    Read-Host "Enter を押して続行"
                     continue
                 }
             }
@@ -2664,16 +2664,16 @@ if (-not ($KBNumbers -or $CheckBlockStatus -or $a -or $BlockUpdate -or $UnblockU
                         Write-Warning "System Restore service is not running (Status: $($srService.Status))"
                         
                         if ($srService.StartType -eq "Disabled") {
-                            Write-Warning "System Restore service is disabled"
-                            $enableService = Read-Host "Would you like to enable and start the System Restore service? (y/n)"
+                            Write-Warning "システムの復元のサービスが無効です"
+                            $enableService = Read-Host "システムの復元のサービスを有効にして開始しますか？ (y/n)"
                             if ($enableService -eq 'y') {
                                 try {
                                     Set-Service -Name "SRService" -StartupType Automatic -ErrorAction Stop
                                     Start-Service -Name "SRService" -ErrorAction Stop
-                                    Write-Host "System Restore service enabled and started" -ForegroundColor Green
+                                    Write-Host "システムの復元のサービスが有効になり、開始されました" -ForegroundColor Green
                                     Start-Sleep -Seconds 5
                                 } catch {
-                                    Write-Warning "Failed to enable System Restore service: $($_.Exception.Message)"
+                                    Write-Warning "システムの復元のサービスを開始できませんでした: $($_.Exception.Message)"
                                 }
                             }
                         } else {
@@ -2683,7 +2683,7 @@ if (-not ($KBNumbers -or $CheckBlockStatus -or $a -or $BlockUpdate -or $UnblockU
                                 Write-Host "System Restore service started" -ForegroundColor Green
                                 Start-Sleep -Seconds 3
                             } catch {
-                                Write-Warning "Failed to start System Restore service: $($_.Exception.Message)"
+                                Write-Warning "システムの復元のサービスを開始できませんでした: $($_.Exception.Message)"
                             }
                         }
                     } elseif (-not $srService) {
@@ -2697,10 +2697,10 @@ if (-not ($KBNumbers -or $CheckBlockStatus -or $a -or $BlockUpdate -or $UnblockU
                     
                 } catch {
                     Write-Warning "Failed to create restore point: $($_.Exception.Message)"
-                    $continue = Read-Host "Continue without restore point? (y/n)"
+                    $continue = Read-Host "復元ポイントを作成せずに続行しますか？ (y/n)"
                     if ($continue -ne 'y') {
-                        Write-Host "Operation cancelled." -ForegroundColor Yellow
-                        Read-Host "Press Enter to continue"
+                        Write-Host "操作がキャンセルされました。" -ForegroundColor Yellow
+                        Read-Host "Enter を押して続行"
                         continue
                     }
                 }
@@ -2741,7 +2741,7 @@ if (-not ($KBNumbers -or $CheckBlockStatus -or $a -or $BlockUpdate -or $UnblockU
                                     $removalMethods += "DateRange"
                                 }
                             } else {
-                                Write-Host "Invalid date range format. Use: YYYY-MM-DD:YYYY-MM-DD" -ForegroundColor Red
+                                Write-Host "日付形式の範囲が無効です。 使用可能: YYYY-MM-DD:YYYY-MM-DD" -ForegroundColor Red
                             }
                         }
                         elseif ($RemoteComputer) {
@@ -2752,7 +2752,7 @@ if (-not ($KBNumbers -or $CheckBlockStatus -or $a -or $BlockUpdate -or $UnblockU
                                 $removalMethods += "Remote"
                                 Write-Host "Successfully processed remotely" -ForegroundColor Green
                             } else {
-                                $errorDetails += "Remote: $($result.Message)"
+                                $errorDetails += "リモート: $($result.Message)"
                             }
                         }
                         else {
