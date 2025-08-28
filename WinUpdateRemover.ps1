@@ -514,19 +514,19 @@ $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIde
 $requiresAdmin = -not ($ListOnly -or $ShowBlockMethods -or $CheckBlockStatus -or $Verify -or $a)
 if (-not $isAdmin -and $requiresAdmin) {
     Write-Host "================================================================" -ForegroundColor Red
-    Write-Host "  ADMINISTRATOR PRIVILEGES REQUIRED" -ForegroundColor Red
+    Write-Host "  管理者権限の環境が必要です" -ForegroundColor Red
     Write-Host "================================================================" -ForegroundColor Red
     Write-Host ""
-    Write-Host "This script requires administrator privileges to perform the following operations:" -ForegroundColor Yellow
-    Write-Host "• Create system restore points" -ForegroundColor White
-    Write-Host "• Remove Windows updates via DISM/WUSA" -ForegroundColor White
-    Write-Host "• Modify Windows registry (HKLM)" -ForegroundColor White
-    Write-Host "• Start/stop Windows services" -ForegroundColor White
-    Write-Host "• Access Windows Update API" -ForegroundColor White
+    Write-Host "このスクリプトでは、以下の操作を実行するために管理者権限が必要です:" -ForegroundColor Yellow
+    Write-Host "• システムの復元ポイントの作成" -ForegroundColor White
+    Write-Host "• DISM/WUSA 経由での Windows Update の削除" -ForegroundColor White
+    Write-Host "• レジストリの変更 (HKLM)" -ForegroundColor White
+    Write-Host "• サービスの開始/停止" -ForegroundColor White
+    Write-Host "• Windows Update API へのアクセス" -ForegroundColor White
     Write-Host ""
-    Write-Host "To run as administrator:" -ForegroundColor Cyan
-    Write-Host "1. Right-click PowerShell and select 'Run as administrator'" -ForegroundColor White
-    Write-Host "2. Or use: Start-Process powershell -Verb RunAs" -ForegroundColor White
+    Write-Host "管理者として実行するには:" -ForegroundColor Cyan
+    Write-Host "1. PowerShell を右クリックし、「管理者として実行」を選択します" -ForegroundColor White
+    Write-Host "2. または: Start-Process powershell -Verb RunAs" -ForegroundColor White
     Write-Host ""
     Write-Host "Read-only operations (list, verify, check status) work without admin rights." -ForegroundColor Green
     Write-Host ""
