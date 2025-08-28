@@ -2369,9 +2369,9 @@ if (-not ($KBNumbers -or $CheckBlockStatus -or $a -or $BlockUpdate -or $UnblockU
         # Interactive menu - loop until user exits
         do {
             Clear-Host
-            Write-Host "========================================" -ForegroundColor Cyan
+            Write-Host "===========================================" -ForegroundColor Cyan
             Write-Host "    Windows Update Remover $($Script:Version) - JP" -ForegroundColor White
-            Write-Host "========================================" -ForegroundColor Cyan
+            Write-Host "===========================================" -ForegroundColor Cyan
             Write-Host ""
 
             $osInfo = Get-CimInstance Win32_OperatingSystem
@@ -2432,13 +2432,13 @@ if (-not ($KBNumbers -or $CheckBlockStatus -or $a -or $BlockUpdate -or $UnblockU
                     }
                 }
                 
-                Write-Host "インストールされた更新プログラムの合計数は $($allUpdates.Count) 個です。このツールで削除可能な更新プログラムは ($($installedUpdates.Count) 個存在します。" -ForegroundColor Green
+                Write-Host "インストールされた更新プログラムの合計数は $($allUpdates.Count) 個です。このツールで削除可能な更新プログラムは ($($installedUpdates.Count 個存在します。" -ForegroundColor Green
                 Write-Host ""
                 
                 # Display comprehensive list grouped by source
                 $groupedUpdates = $allUpdates | Group-Object Source
                 foreach ($group in $groupedUpdates) {
-                    Write-Host "--- $($group.Name) 更新 ---" -ForegroundColor Cyan
+                    Write-Host "--- $($group.Name) の更新 ---" -ForegroundColor Cyan
                     foreach ($update in $group.Group | Sort-Object InstallDate -Descending) {
                         $installDate = if ($update.InstallDate) { $update.InstallDate.ToString("yyyy-MM-dd") } else { "Unknown" }
                         
@@ -2821,29 +2821,29 @@ if (-not ($KBNumbers -or $CheckBlockStatus -or $a -or $BlockUpdate -or $UnblockU
                         } else {
                             Write-Host "Failed to process $($update.HotFixID)" -ForegroundColor Red
                             Write-Host "Attempted methods: $($removalMethods -join ', ')" -ForegroundColor Gray
-                            Write-Host "Errors: $($errorDetails -join '; ')" -ForegroundColor Yellow
+                            Write-Host "エラー: $($errorDetails -join '; ')" -ForegroundColor Yellow
                         }
                     } catch {
                         Write-Host "Failed to process $($update.HotFixID): $($_.Exception.Message)" -ForegroundColor Red
                     }
                 }
                 
-                Write-Host "`nUpdate processing completed!" -ForegroundColor Green
-                Read-Host "Press Enter to continue"
+                Write-Host "`n更新の処理が完了しました！" -ForegroundColor Green
+                Read-Host "Enter を押して続行"
                 
             } catch {
                 Write-Host "Error scanning for updates: $($_.Exception.Message)" -ForegroundColor Red
-                Read-Host "Press Enter to continue"
+                Read-Host "Enter を押して続行"
                 continue
             }
         
         "2" {
             # Block updates
             Write-Host ""
-            Write-Host "=== Block Updates ===" -ForegroundColor Cyan
-            Write-Host "- Enter 'back' or 'b' to return to main menu" -ForegroundColor Gray
-            Write-Host "- Enter KB numbers to block (comma-separated, e.g., KB5063878,KB1234567)" -ForegroundColor Yellow
-            $kbInput = Read-Host "KB Number(s)"
+            Write-Host "=== 更新をブロック ===" -ForegroundColor Cyan
+            Write-Host "- 「back」または「b」を入力でメインメニューに戻ります" -ForegroundColor Gray
+            Write-Host "- ブロックする KB 番号を入力してください (コンマ区切り 例: KB5063878,KB1234567)" -ForegroundColor Yellow
+            $kbInput = Read-Host "KB 番号"
             
             if ($kbInput -eq 'back' -or $kbInput -eq 'b') {
                 continue
@@ -2856,20 +2856,20 @@ if (-not ($KBNumbers -or $CheckBlockStatus -or $a -or $BlockUpdate -or $UnblockU
                     if ($normalizedKB) {
                         Block-UpdateKB -KBNumber $normalizedKB
                     } else {
-                        Write-Warning "Invalid KB format: $kb"
+                        Write-Warning "無効な KB 形式: $kb"
                     }
                 }
             }
-            Read-Host "Press Enter to continue"
+            Read-Host "Enter を押して続行"
         }
         "3" {
             # Unblock updates
             Write-Host ""
-            Write-Host "=== Unblock Updates ===" -ForegroundColor Cyan
-            Write-Host "- Enter 'back' or 'b' to return to main menu" -ForegroundColor Gray
-            Write-Host "- Enter 'all' or 'A' to unblock all currently blocked updates:" -ForegroundColor Green
+            Write-Host "=== 更新のブロックを解除 ===" -ForegroundColor Cyan
+            Write-Host "- 「back」または「b」を入力でメインメニューに戻ります" -ForegroundColor Gray
+            Write-Host "- 現在されているすべての更新のブロックを解除するには「all」または「A」を入力します:" -ForegroundColor Green
             Write-Host '- Enter KB numbers to unblock (comma-separated, e.g., KB5063878,KB1234567)' -ForegroundColor Yellow
-            $kbInput = Read-Host "KB Number(s) or 'all'"
+            $kbInput = Read-Host "KB 番号または「all」"
             
             if ($kbInput -eq 'back' -or $kbInput -eq 'b') {
                 continue
@@ -2992,15 +2992,15 @@ if (-not ($KBNumbers -or $CheckBlockStatus -or $a -or $BlockUpdate -or $UnblockU
         }
 
             "0" {
-            Write-Host "Exiting..." -ForegroundColor Yellow
+            Write-Host "終了中..." -ForegroundColor Yellow
             exit 0
         }
             "q" {
-            Write-Host "Exiting..." -ForegroundColor Yellow
+            Write-Host "終了中..." -ForegroundColor Yellow
             exit 0
         }
             "Q" {
-            Write-Host "Exiting..." -ForegroundColor Yellow
+            Write-Host "終了中..." -ForegroundColor Yellow
             exit 0
         }
         default {
@@ -3221,7 +3221,7 @@ foreach ($update in $updatesToProcess) {
         }
     }
     
-    Write-Host "Removing KB$kb..." -ForegroundColor Red
+    Write-Host "KB$kb を削除中..." -ForegroundColor Red
     
     $removeSuccess = $false
     $removalMethods = @()
