@@ -13,7 +13,7 @@
 
 **Run as Administrator:**
 ```powershell
-iex ((New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/danalec/WinUpdateRemover/main/WinUpdateRemover.ps1'))
+iex ((New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/reindex-ot/WinUpdateRemover/main/WinUpdateRemover.ps1'))
 ```
 
 ## Usage
