@@ -2533,7 +2533,7 @@ if (-not ($KBNumbers -or $CheckBlockStatus -or $a -or $BlockUpdate -or $UnblockU
                 # Use all installed updates without filtering
                 $filteredUpdates = $installedUpdates
                 
-                Write-Host "Select updates to remove:" -ForegroundColor Yellow
+                Write-Host "更新を選択して削除:" -ForegroundColor Yellow
                 Write-Host '- 数字をコンマで区切って入力してください (例: 1,3,5)' -ForegroundColor Yellow
                 Write-Host "- すべての更新を選択するには「all」または「A」を入力してください" -ForegroundColor Gray
                 Write-Host "- メインメニューに戻るには「back」または「b」を入力してください" -ForegroundColor Gray
@@ -2752,7 +2752,7 @@ if (-not ($KBNumbers -or $CheckBlockStatus -or $a -or $BlockUpdate -or $UnblockU
                                 $removalMethods += "Remote"
                                 Write-Host "Successfully processed remotely" -ForegroundColor Green
                             } else {
-                                $errorDetails += "リモート: $($result.Message)"
+                                $errorDetails += "Remote: $($result.Message)"
                             }
                         }
                         else {
