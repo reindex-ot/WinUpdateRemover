@@ -528,7 +528,7 @@ if (-not $isAdmin -and $requiresAdmin) {
     Write-Host "1. PowerShell を右クリックし、「管理者として実行」を選択します" -ForegroundColor White
     Write-Host "2. または: Start-Process powershell -Verb RunAs" -ForegroundColor White
     Write-Host ""
-    Write-Host "Read-only operations (list, verify, check status) work without admin rights." -ForegroundColor Green
+    Write-Host "読み取り専用の操作 (一覧の表示、検証、状態の確認) は管理者権限なしでも機能します。" -ForegroundColor Green
     Write-Host ""
     exit 1
 }
